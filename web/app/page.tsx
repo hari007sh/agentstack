@@ -241,7 +241,7 @@ export default function LandingPage() {
               Pricing
             </a>
             <a
-              href="https://github.com/agentstack/agentstack"
+              href="http://localhost:3001/docs"
               target="_blank"
               rel="noopener noreferrer"
               className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"

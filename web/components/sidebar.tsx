@@ -25,6 +25,8 @@ import {
   Play,
   Database,
   Bell,
+  BookOpen,
+  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
@@ -36,6 +38,7 @@ interface NavItem {
   href: string;
   icon: React.ElementType;
   badge?: string;
+  external?: boolean;
 }
 
 interface NavSection {
@@ -86,6 +89,12 @@ const navigation: NavSection[] = [
       { label: "Team", href: "/dashboard/settings/team", icon: Users },
       { label: "Billing", href: "/dashboard/settings/billing", icon: CreditCard },
       { label: "Webhooks", href: "/dashboard/settings/webhooks", icon: Bell },
+    ],
+  },
+  {
+    title: "Resources",
+    items: [
+      { label: "Documentation", href: "http://localhost:3001/docs", icon: BookOpen, external: true },
     ],
   },
 ];
@@ -152,13 +161,11 @@ export function Sidebar() {
               )}
               {section.items.map((item) => {
                 const isActive =
-                  pathname === item.href ||
+                  !item.external && (pathname === item.href ||
                   (item.href !== "/dashboard/overview" &&
-                    pathname.startsWith(item.href));
+                    pathname.startsWith(item.href)));
                 const Icon = item.icon;
-
-                return (
-                  <Link key={item.href} href={item.href}>
+                const inner = (
                     <motion.div
                       className={cn(
                         "relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-[13px] transition-all duration-150",
@@ -205,12 +212,24 @@ export function Sidebar() {
                       {!collapsed && (
                         <span className="truncate">{item.label}</span>
                       )}
+                      {!collapsed && item.external && (
+                        <ExternalLink className="ml-auto w-3 h-3 text-[var(--text-tertiary)]" />
+                      )}
                       {!collapsed && item.badge && (
                         <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]">
                           {item.badge}
                         </span>
                       )}
                     </motion.div>
+                );
+
+                return item.external ? (
+                  <a key={item.href} href={item.href} target="_blank" rel="noopener noreferrer">
+                    {inner}
+                  </a>
+                ) : (
+                  <Link key={item.href} href={item.href}>
+                    {inner}
                   </Link>
                 );
               })}
