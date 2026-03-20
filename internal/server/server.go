@@ -34,7 +34,7 @@ type Server struct {
 }
 
 // New creates a new Server instance with all dependencies.
-func New(cfg *config.Config, db *sql.DB, redisClient *redis.Client, natsConn *nats.Conn) *Server {
+func New(cfg *config.Config, db *sql.DB, redisClient *redis.Client, natsConn *nats.Conn, opts ...func(*Server)) *Server {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -53,10 +53,22 @@ func New(cfg *config.Config, db *sql.DB, redisClient *redis.Client, natsConn *na
 		logger:      logger,
 	}
 
+	// Apply options (e.g., WithClickHouse)
+	for _, opt := range opts {
+		opt(s)
+	}
+
 	s.setupMiddleware()
 	s.setupRoutes()
 
 	return s
+}
+
+// WithClickHouse returns an option that sets the ClickHouse database connection.
+func WithClickHouse(db *sql.DB) func(*Server) {
+	return func(s *Server) {
+		s.clickhouseDB = db
+	}
 }
 
 func (s *Server) setupMiddleware() {

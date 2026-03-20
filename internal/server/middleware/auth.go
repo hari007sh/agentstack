@@ -42,6 +42,41 @@ func APIKeyAuth(store *auth.APIKeyStore) func(http.Handler) http.Handler {
 	}
 }
 
+// DualAuth returns middleware that accepts EITHER a JWT token (from dashboard login)
+// OR an API key (from SDKs). It tries JWT first, then falls back to API key.
+// This allows the dashboard frontend and SDKs to use the same /v1/* endpoints.
+func DualAuth(jwtManager *auth.JWTManager, apiKeyStore *auth.APIKeyStore) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := extractBearerToken(r)
+			if token == "" {
+				writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid Authorization header")
+				return
+			}
+
+			// Try JWT first (dashboard users)
+			claims, jwtErr := jwtManager.ValidateToken(token)
+			if jwtErr == nil {
+				ctx := context.WithValue(r.Context(), UserIDKey, claims.UserID)
+				ctx = context.WithValue(ctx, OrgIDKey, claims.OrgID)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// Fall back to API key (SDK users)
+			info, apiErr := apiKeyStore.Validate(r.Context(), token)
+			if apiErr == nil {
+				ctx := context.WithValue(r.Context(), OrgIDKey, info.OrgID)
+				ctx = context.WithValue(ctx, APIKeyIDKey, info.KeyID)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired API key")
+		})
+	}
+}
+
 // JWTAuth returns middleware that authenticates requests using JWT tokens.
 func JWTAuth(jwtManager *auth.JWTManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

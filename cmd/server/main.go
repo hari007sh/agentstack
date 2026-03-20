@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/agentstack/agentstack/internal/config"
 	"github.com/agentstack/agentstack/internal/server"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -69,8 +70,33 @@ func main() {
 		logger.Info("connected to NATS")
 	}
 
+	// Connect to ClickHouse via native protocol (same as worker)
+	var chDB *sql.DB
+	if cfg.ClickhouseURL != "" {
+		chDB, err = sql.Open("clickhouse", cfg.ClickhouseURL)
+		if err != nil {
+			logger.Warn("ClickHouse connection failed, session/analytics features disabled", "error", err)
+			chDB = nil
+		} else {
+			chCtx, chCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer chCancel()
+			if pingErr := chDB.PingContext(chCtx); pingErr != nil {
+				logger.Warn("ClickHouse ping failed, session/analytics features disabled", "error", pingErr)
+				chDB.Close()
+				chDB = nil
+			} else {
+				defer chDB.Close()
+				logger.Info("connected to ClickHouse")
+			}
+		}
+	}
+
 	// Create and run server
-	srv := server.New(cfg, db, redisClient, natsConn)
+	var opts []func(*server.Server)
+	if chDB != nil {
+		opts = append(opts, server.WithClickHouse(chDB))
+	}
+	srv := server.New(cfg, db, redisClient, natsConn, opts...)
 	logger.Info("starting AgentStack API server", "port", cfg.Port)
 	if err := srv.Run(); err != nil {
 		log.Fatalf("server error: %v", err)
