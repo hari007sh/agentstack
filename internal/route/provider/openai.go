@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // OpenAIAdapter implements Provider for the OpenAI API.
@@ -21,7 +22,8 @@ type OpenAIAdapter struct {
 func NewOpenAIAdapter(cfg AdapterConfig) *OpenAIAdapter {
 	base := "https://api.openai.com"
 	if cfg.BaseURL != "" {
-		base = cfg.BaseURL
+		base = strings.TrimSuffix(cfg.BaseURL, "/v1")
+		base = strings.TrimSuffix(base, "/")
 	}
 	return &OpenAIAdapter{
 		apiKey:     cfg.APIKey,

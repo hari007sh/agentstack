@@ -18,6 +18,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Sparkles,
+  AlertCircle,
 } from "lucide-react";
 import { fadeIn } from "@/lib/animations";
 import { SkeletonBlock } from "@/components/skeleton";
@@ -41,22 +42,37 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
+import { api } from "@/lib/api";
 
 // --- Types ---
+
+/** Provider record from GET /v1/gateway/providers */
+interface ProviderRecord {
+  id: string;
+  name: string;
+  display_name: string;
+  base_url: string;
+  is_enabled: boolean;
+  config: Record<string, unknown>;
+}
+
 interface ModelConfig {
   id: string;
   name: string;
-  provider: string;
+  provider: string;       // backend provider name, e.g. "openai"
+  providerDisplay: string; // display name, e.g. "OpenAI"
   providerColor: string;
   badge: string;
 }
 
 interface OutputData {
   text: string;
-  tokens: number;
+  tokens_in: number;
+  tokens_out: number;
   latency: number;
   cost: string;
   displayedText: string;
+  error?: string;
 }
 
 interface HistoryEntry {
@@ -70,119 +86,110 @@ interface HistoryEntry {
 }
 
 // --- Constants ---
-const MODELS: ModelConfig[] = [
-  { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI", providerColor: "#10a37f", badge: "Latest" },
-  { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", providerColor: "#10a37f", badge: "Fast" },
-  { id: "gpt-4-turbo", name: "GPT-4 Turbo", provider: "OpenAI", providerColor: "#10a37f", badge: "" },
-  { id: "claude-3-opus", name: "Claude 3 Opus", provider: "Anthropic", providerColor: "#d4a574", badge: "Powerful" },
-  { id: "claude-3-sonnet", name: "Claude 3.5 Sonnet", provider: "Anthropic", providerColor: "#d4a574", badge: "Balanced" },
-  { id: "claude-3-haiku", name: "Claude 3 Haiku", provider: "Anthropic", providerColor: "#d4a574", badge: "Fast" },
-  { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", provider: "Google", providerColor: "#4285f4", badge: "" },
-  { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", provider: "Google", providerColor: "#4285f4", badge: "Fast" },
-  { id: "mixtral-8x7b", name: "Mixtral 8x7B", provider: "Mistral", providerColor: "#ff7000", badge: "" },
-  { id: "llama-3-70b", name: "Llama 3 70B", provider: "Meta", providerColor: "#0668e1", badge: "Open" },
-];
+
+/** Well-known provider colors for display */
+const PROVIDER_COLORS: Record<string, string> = {
+  openai: "#10a37f",
+  anthropic: "#d4a574",
+  google: "#4285f4",
+  mistral: "#ff7000",
+  together: "#6366f1",
+  groq: "#f97316",
+  meta: "#0668e1",
+};
+
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  google: "Google",
+  mistral: "Mistral",
+  together: "Together",
+  groq: "Groq",
+  meta: "Meta",
+};
 
 const PROVIDER_ICONS: Record<string, string> = {
-  OpenAI: "OA",
-  Anthropic: "AN",
-  Google: "GG",
-  Mistral: "MI",
-  Meta: "ME",
+  openai: "OA",
+  anthropic: "AN",
+  google: "GG",
+  mistral: "MI",
+  together: "TG",
+  groq: "GQ",
+  meta: "ME",
 };
 
-// --- Mock response data ---
-const mockResponses: Record<string, { text: string; tokens: number; latency: number; cost: string }> = {
-  "gpt-4o": {
-    text: `Based on the analysis of recent developments in quantum computing, here are the key findings:
-
-1. **Error Correction Breakthrough**: Researchers at IBM demonstrated a new error correction code that reduces logical error rates by 10x compared to previous methods. This brings us closer to fault-tolerant quantum computing.
-
-2. **Scalability Progress**: Google's latest quantum processor achieved 70 qubits with improved coherence times, suggesting that 1000+ qubit systems may be achievable within 3-5 years.
-
-3. **Practical Applications**: Several companies have demonstrated quantum advantage in optimization problems, particularly in supply chain logistics and drug discovery simulations.
-
-4. **Hardware Diversity**: Trapped-ion systems from IonQ and photonic approaches from Xanadu are proving competitive with superconducting architectures, expanding the ecosystem.
-
-The field is progressing faster than most experts predicted, with commercial viability for specific use cases expected by 2028.`,
-    tokens: 187,
-    latency: 2340,
-    cost: "$0.0094",
-  },
-  "gpt-4o-mini": {
-    text: `Here are the key findings on quantum computing developments:
-
-1. **Error Correction**: IBM achieved 10x improvement in error correction codes.
-2. **Scalability**: Google reached 70 qubits with better coherence times.
-3. **Applications**: Quantum advantage demonstrated in optimization and drug discovery.
-4. **Hardware**: Multiple architectures (superconducting, trapped-ion, photonic) are competitive.
-
-Commercial viability for specific use cases is expected by 2028.`,
-    tokens: 89,
-    latency: 890,
-    cost: "$0.0012",
-  },
-  "claude-3-opus": {
-    text: `The quantum computing landscape has seen remarkable progress across several fronts:
-
-**Error Correction**
-IBM's latest research demonstrates a novel error correction code achieving a 10x reduction in logical error rates. This represents a significant step toward fault-tolerant quantum computing, which is widely considered the threshold for practical quantum computation.
-
-**Scale and Performance**
-Google's newest quantum processor operates at 70 qubits with substantially improved coherence times. Industry roadmaps now project 1000+ qubit systems within a 3-5 year horizon, though maintaining quality at scale remains the critical challenge.
-
-**Real-World Impact**
-The transition from theoretical to practical is accelerating. Companies have demonstrated genuine quantum advantage in:
-- Supply chain optimization
-- Molecular simulation for drug discovery
-- Financial portfolio optimization
-
-**Architectural Diversity**
-The competitive landscape is broadening beyond superconducting qubits, with trapped-ion (IonQ) and photonic (Xanadu) approaches showing compelling results.
-
-Commercial quantum computing for targeted applications appears on track for 2028, though general-purpose quantum computing remains a longer-term goal.`,
-    tokens: 213,
-    latency: 3120,
-    cost: "$0.0180",
-  },
-  "claude-3-sonnet": {
-    text: `Here's a summary of the latest quantum computing developments:
-
-**Key Breakthroughs:**
-- IBM's new error correction code achieves 10x reduction in logical error rates
-- Google's 70-qubit processor shows improved coherence times
-
-**Scalability:**
-Industry experts project 1000+ qubit systems within 3-5 years. The main bottleneck remains maintaining qubit quality at scale.
-
-**Practical Applications:**
-Quantum advantage has been demonstrated in supply chain optimization, drug discovery, and financial modeling. These represent the first commercially viable use cases.
-
-**Ecosystem Growth:**
-Multiple hardware approaches are now viable — superconducting (IBM, Google), trapped-ion (IonQ), and photonic (Xanadu) systems are all competitive.
-
-Expected commercial viability for targeted applications: 2028.`,
-    tokens: 145,
-    latency: 1780,
-    cost: "$0.0058",
-  },
+/**
+ * Well-known models per provider. Used as a catalog when providers are configured
+ * but no models list is available from the API. The user can still type in any
+ * model name; these are just the common options that show up in the picker.
+ */
+const KNOWN_MODELS: Record<string, { id: string; name: string; badge: string }[]> = {
+  openai: [
+    { id: "gpt-4o", name: "GPT-4o", badge: "Latest" },
+    { id: "gpt-4o-mini", name: "GPT-4o Mini", badge: "Fast" },
+    { id: "gpt-4-turbo", name: "GPT-4 Turbo", badge: "" },
+    { id: "o1", name: "o1", badge: "Reasoning" },
+    { id: "o1-mini", name: "o1 Mini", badge: "Fast" },
+  ],
+  anthropic: [
+    { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", badge: "Latest" },
+    { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", badge: "Balanced" },
+    { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", badge: "Fast" },
+    { id: "claude-3-opus-20240229", name: "Claude 3 Opus", badge: "Powerful" },
+  ],
+  google: [
+    { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", badge: "" },
+    { id: "gemini-1.5-flash", name: "Gemini 1.5 Flash", badge: "Fast" },
+    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", badge: "Latest" },
+  ],
+  mistral: [
+    { id: "mistral-large-latest", name: "Mistral Large", badge: "" },
+    { id: "mistral-small-latest", name: "Mistral Small", badge: "Fast" },
+    { id: "mixtral-8x7b-instruct", name: "Mixtral 8x7B", badge: "" },
+  ],
+  together: [
+    { id: "meta-llama/Llama-3-70b-chat-hf", name: "Llama 3 70B", badge: "Open" },
+    { id: "meta-llama/Llama-3-8b-chat-hf", name: "Llama 3 8B", badge: "Fast" },
+  ],
+  groq: [
+    { id: "llama3-70b-8192", name: "Llama 3 70B", badge: "Fast" },
+    { id: "mixtral-8x7b-32768", name: "Mixtral 8x7B", badge: "" },
+  ],
 };
 
-// Default fallback for models without specific mock data
-const defaultMockResponse = {
-  text: `Based on current developments in quantum computing:
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-**Key Highlights:**
-- Error correction rates improving by order of magnitude
-- Qubit counts reaching 70+ with improved stability
-- Practical applications emerging in optimization and simulation
-- Multiple hardware architectures proving competitive
-
-The field continues to advance toward commercial viability, with targeted applications expected by 2028.`,
-  tokens: 72,
-  latency: 1200,
-  cost: "$0.0035",
-};
+// --- Helper: build model catalog from providers ---
+function buildModelCatalog(providers: ProviderRecord[]): ModelConfig[] {
+  const models: ModelConfig[] = [];
+  for (const p of providers) {
+    if (!p.is_enabled) continue;
+    const known = KNOWN_MODELS[p.name] || [];
+    if (known.length === 0) {
+      // Unknown provider — add a single generic entry
+      models.push({
+        id: `${p.name}:default`,
+        name: p.display_name || p.name,
+        provider: p.name,
+        providerDisplay: p.display_name || PROVIDER_DISPLAY_NAMES[p.name] || p.name,
+        providerColor: PROVIDER_COLORS[p.name] || "#666",
+        badge: "",
+      });
+    } else {
+      for (const m of known) {
+        models.push({
+          id: m.id,
+          name: m.name,
+          provider: p.name,
+          providerDisplay: p.display_name || PROVIDER_DISPLAY_NAMES[p.name] || p.name,
+          providerColor: PROVIDER_COLORS[p.name] || "#666",
+          badge: m.badge,
+        });
+      }
+    }
+  }
+  return models;
+}
 
 // --- Slider Component ---
 function ParamSlider({
@@ -280,19 +287,22 @@ function StreamingDots() {
 // --- Output Panel ---
 function OutputPanel({
   modelId,
+  models,
   output,
   isStreaming,
   onCopy,
   copied,
 }: {
   modelId: string;
+  models: ModelConfig[];
   output: OutputData | null;
   isStreaming: boolean;
   onCopy: (text: string) => void;
   copied: string | null;
 }) {
-  const modelConfig = MODELS.find((m) => m.id === modelId);
-  const isComplete = output && output.displayedText.length >= output.text.length;
+  const modelConfig = models.find((m) => m.id === modelId);
+  const isComplete = output && !isStreaming && !output.error;
+  const totalTokens = output ? (output.tokens_in + output.tokens_out) : 0;
 
   return (
     <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden flex flex-col h-full">
@@ -305,7 +315,7 @@ function OutputPanel({
           <span className="text-xs font-medium text-[var(--text-secondary)]">
             {modelConfig?.name || modelId}
           </span>
-          {isStreaming && !isComplete && (
+          {isStreaming && !output?.error && (
             <Badge className="bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] border-[var(--accent-blue)]/20 text-[10px] px-1.5 py-0 h-4">
               Streaming
             </Badge>
@@ -315,12 +325,17 @@ function OutputPanel({
               Complete
             </Badge>
           )}
+          {output?.error && (
+            <Badge className="bg-[var(--accent-red)]/10 text-[var(--accent-red)] border-[var(--accent-red)]/20 text-[10px] px-1.5 py-0 h-4">
+              Error
+            </Badge>
+          )}
         </div>
-        {output && (
+        {output && !output.error && (
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1 text-[10px] text-[var(--text-tertiary)]">
               <Hash className="w-3 h-3" />
-              <span className="tabular-nums">{output.tokens}</span>
+              <span className="tabular-nums">{totalTokens}</span>
               <span className="hidden sm:inline">tokens</span>
             </div>
             <div className="flex items-center gap-1 text-[10px] text-[var(--text-tertiary)]">
@@ -348,10 +363,18 @@ function OutputPanel({
 
       {/* Output body */}
       <div className="p-4 flex-1 overflow-y-auto min-h-[200px]">
-        {output ? (
+        {output?.error ? (
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-[var(--accent-red)]/5 border border-[var(--accent-red)]/10">
+            <AlertCircle className="w-4 h-4 text-[var(--accent-red)] mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-[var(--accent-red)]">Execution failed</p>
+              <p className="text-xs text-[var(--text-secondary)] mt-1">{output.error}</p>
+            </div>
+          </div>
+        ) : output ? (
           <div className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap font-mono leading-relaxed">
             {output.displayedText}
-            {!isComplete && (
+            {isStreaming && (
               <span className="inline-block w-[2px] h-4 bg-[var(--accent-blue)] ml-0.5 animate-pulse align-middle" />
             )}
           </div>
@@ -377,172 +400,492 @@ function OutputPanel({
   );
 }
 
+// --- Cost estimation helper ---
+function formatCostCents(cents: number): string {
+  if (cents === 0) return "$0.00";
+  if (cents < 1) return `$${(cents / 100).toFixed(4)}`;
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
 // --- Main Page Component ---
 export default function PlaygroundPage() {
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<"single" | "compare">("single");
-  const [prompt, setPrompt] = useState(
-    "Summarize the latest developments in quantum computing. Focus on key breakthroughs, scalability progress, and practical applications."
-  );
+  const [prompt, setPrompt] = useState("");
   const [systemPrompt, setSystemPrompt] = useState(
     "You are a helpful AI assistant. Provide clear, well-structured responses with concrete examples when possible."
   );
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
-  const [model, setModel] = useState("gpt-4o");
-  const [compareModelA, setCompareModelA] = useState("gpt-4o");
-  const [compareModelB, setCompareModelB] = useState("claude-3-opus");
+
+  // Model selections — these are model IDs like "gpt-4o"
+  const [model, setModel] = useState("");
+  const [compareModelA, setCompareModelA] = useState("");
+  const [compareModelB, setCompareModelB] = useState("");
+
+  // Provider data from API
+  const [providers, setProviders] = useState<ProviderRecord[]>([]);
+  const [models, setModels] = useState<ModelConfig[]>([]);
+  const [providersError, setProvidersError] = useState<string | null>(null);
 
   // Parameters
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(1024);
   const [topP, setTopP] = useState(1.0);
-  const [frequencyPenalty, setFrequencyPenalty] = useState(0.0);
-  const [presencePenalty, setPresencePenalty] = useState(0.0);
 
   // State
   const [running, setRunning] = useState(false);
   const [outputs, setOutputs] = useState<Record<string, OutputData>>({});
   const [copied, setCopied] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [history, setHistory] = useState<HistoryEntry[]>([
-    {
-      id: "h1",
-      prompt: "Explain transformer architecture in simple terms",
-      model: "gpt-4o",
-      timestamp: new Date(Date.now() - 3600000),
-      tokens: 245,
-      latency: 2100,
-      cost: "$0.012",
-    },
-    {
-      id: "h2",
-      prompt: "Write a Python function that implements binary search",
-      model: "claude-3-opus",
-      timestamp: new Date(Date.now() - 7200000),
-      tokens: 178,
-      latency: 1890,
-      cost: "$0.015",
-    },
-    {
-      id: "h3",
-      prompt: "Compare REST vs GraphQL for a mobile app backend",
-      model: "gpt-4o-mini",
-      timestamp: new Date(Date.now() - 14400000),
-      tokens: 312,
-      latency: 1250,
-      cost: "$0.004",
-    },
-    {
-      id: "h4",
-      prompt: "Summarize the latest developments in quantum computing",
-      model: "gpt-4o",
-      timestamp: new Date(Date.now() - 86400000),
-      tokens: 187,
-      latency: 2340,
-      cost: "$0.009",
-    },
-  ]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
-  const intervalRefs = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // --- Load providers from API on mount ---
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 500);
-    return () => clearTimeout(timer);
+    let cancelled = false;
+
+    async function loadProviders() {
+      try {
+        const data = await api.get<ProviderRecord[]>("/v1/gateway/providers");
+        if (cancelled) return;
+
+        const list = Array.isArray(data) ? data : [];
+        setProviders(list);
+
+        const catalog = buildModelCatalog(list);
+        setModels(catalog);
+
+        // Set default selections
+        if (catalog.length > 0) {
+          setModel(catalog[0].id);
+          setCompareModelA(catalog[0].id);
+          setCompareModelB(catalog.length > 1 ? catalog[1].id : catalog[0].id);
+        }
+
+        setProvidersError(null);
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Failed to load providers:", err);
+        setProvidersError(
+          err instanceof Error ? err.message : "Failed to load providers"
+        );
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadProviders();
+    return () => { cancelled = true; };
   }, []);
 
-  // Cleanup intervals on unmount
+  // Cleanup abort controller on unmount
   useEffect(() => {
-    const refs = intervalRefs.current;
     return () => {
-      Object.values(refs).forEach(clearInterval);
+      abortRef.current?.abort();
     };
   }, []);
 
-  const simulateStream = useCallback(
-    (modelKey: string, response: { text: string; tokens: number; latency: number; cost: string }) => {
-      let charIndex = 0;
-      const fullText = response.text;
+  // --- Find provider name for a model ID ---
+  const getProviderForModel = useCallback(
+    (modelId: string): string => {
+      const mc = models.find((m) => m.id === modelId);
+      return mc?.provider || "";
+    },
+    [models]
+  );
 
+  // --- Execute single run with SSE streaming ---
+  const executeSingleStream = useCallback(
+    async (
+      modelId: string,
+      providerName: string,
+      abortSignal: AbortSignal
+    ) => {
+      // Initialize output
       setOutputs((prev) => ({
         ...prev,
-        [modelKey]: {
-          ...response,
+        [modelId]: {
+          text: "",
+          tokens_in: 0,
+          tokens_out: 0,
+          latency: 0,
+          cost: "$0.00",
           displayedText: "",
         },
       }));
 
-      intervalRefs.current[modelKey] = setInterval(() => {
-        charIndex += 3;
-        if (charIndex >= fullText.length) {
-          charIndex = fullText.length;
-          clearInterval(intervalRefs.current[modelKey]);
-        }
+      const body = JSON.stringify({
+        body: prompt,
+        system_prompt: systemPrompt,
+        model: modelId,
+        provider: providerName,
+        stream: true,
+        config: {
+          temperature,
+          max_tokens: maxTokens,
+          top_p: topP,
+        },
+      });
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+
+      // Try to get auth token from cookie or localStorage
+      const token =
+        typeof window !== "undefined"
+          ? localStorage.getItem("auth_token") || ""
+          : "";
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(`${API_URL}/v1/playground/execute`, {
+        method: "POST",
+        headers,
+        body,
+        signal: abortSignal,
+      });
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({
+          error: { message: response.statusText },
+        }));
+        const errMsg =
+          errBody?.error?.message || `HTTP ${response.status}: ${response.statusText}`;
         setOutputs((prev) => ({
           ...prev,
-          [modelKey]: {
-            ...response,
-            displayedText: fullText.slice(0, charIndex),
+          [modelId]: {
+            text: "",
+            tokens_in: 0,
+            tokens_out: 0,
+            latency: 0,
+            cost: "$0.00",
+            displayedText: "",
+            error: errMsg,
           },
         }));
-      }, 12);
+        return;
+      }
+
+      // Parse SSE stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        setOutputs((prev) => ({
+          ...prev,
+          [modelId]: {
+            ...prev[modelId],
+            error: "No response body",
+          },
+        }));
+        return;
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (data === "[DONE]") continue;
+
+          try {
+            const event = JSON.parse(data);
+
+            if (event.type === "token" && event.content) {
+              fullText += event.content;
+              setOutputs((prev) => ({
+                ...prev,
+                [modelId]: {
+                  ...prev[modelId],
+                  text: fullText,
+                  displayedText: fullText,
+                },
+              }));
+            }
+
+            if (event.type === "done") {
+              setOutputs((prev) => ({
+                ...prev,
+                [modelId]: {
+                  ...prev[modelId],
+                  text: fullText,
+                  displayedText: fullText,
+                  tokens_in: event.tokens_in || 0,
+                  tokens_out: event.tokens_out || 0,
+                  latency: event.latency_ms || 0,
+                  cost: formatCostCents(event.cost_cents || 0),
+                },
+              }));
+            }
+          } catch {
+            // skip malformed SSE data
+          }
+        }
+      }
     },
-    []
+    [prompt, systemPrompt, temperature, maxTokens, topP]
   );
 
-  const handleRun = useCallback(() => {
+  // --- Execute single run (non-streaming fallback) ---
+  const executeNonStreaming = useCallback(
+    async (modelId: string, providerName: string): Promise<OutputData> => {
+      const resp = await api.post<{
+        data: {
+          output: string;
+          model: string;
+          provider: string;
+          tokens_in: number;
+          tokens_out: number;
+          cost_cents: number;
+          latency_ms: number;
+          finish_reason: string;
+        };
+      }>("/v1/playground/execute", {
+        body: prompt,
+        system_prompt: systemPrompt,
+        model: modelId,
+        provider: providerName,
+        stream: false,
+        config: {
+          temperature,
+          max_tokens: maxTokens,
+          top_p: topP,
+        },
+      });
+
+      const d = resp.data;
+      return {
+        text: d.output,
+        tokens_in: d.tokens_in,
+        tokens_out: d.tokens_out,
+        latency: d.latency_ms,
+        cost: formatCostCents(d.cost_cents),
+        displayedText: d.output,
+      };
+    },
+    [prompt, systemPrompt, temperature, maxTokens, topP]
+  );
+
+  // --- Execute compare mode ---
+  const executeCompare = useCallback(
+    async (modelA: string, modelB: string, abortSignal: AbortSignal) => {
+      const providerA = getProviderForModel(modelA);
+      const providerB = getProviderForModel(modelB);
+
+      if (!providerA || !providerB) {
+        setOutputs({
+          [modelA]: {
+            text: "",
+            tokens_in: 0,
+            tokens_out: 0,
+            latency: 0,
+            cost: "$0.00",
+            displayedText: "",
+            error: !providerA
+              ? "No provider found for model " + modelA
+              : "No provider found for model " + modelB,
+          },
+        });
+        return;
+      }
+
+      // Initialize both outputs
+      setOutputs({
+        [modelA]: {
+          text: "",
+          tokens_in: 0,
+          tokens_out: 0,
+          latency: 0,
+          cost: "$0.00",
+          displayedText: "",
+        },
+        [modelB]: {
+          text: "",
+          tokens_in: 0,
+          tokens_out: 0,
+          latency: 0,
+          cost: "$0.00",
+          displayedText: "",
+        },
+      });
+
+      try {
+        const resp = await api.post<{
+          data: {
+            results: Array<{
+              output: string;
+              model: string;
+              provider: string;
+              tokens_in: number;
+              tokens_out: number;
+              cost_cents: number;
+              latency_ms: number;
+              finish_reason: string;
+            }>;
+          };
+        }>("/v1/playground/compare", {
+          body: prompt,
+          system_prompt: systemPrompt,
+          models: [
+            { model: modelA, provider: providerA },
+            { model: modelB, provider: providerB },
+          ],
+          config: {
+            temperature,
+            max_tokens: maxTokens,
+            top_p: topP,
+          },
+        });
+
+        if (abortSignal.aborted) return;
+
+        const results = resp.data.results;
+        const newOutputs: Record<string, OutputData> = {};
+
+        for (const r of results) {
+          const isError = r.output.startsWith("Error:");
+          newOutputs[r.model] = {
+            text: r.output,
+            tokens_in: r.tokens_in,
+            tokens_out: r.tokens_out,
+            latency: r.latency_ms,
+            cost: formatCostCents(r.cost_cents),
+            displayedText: r.output,
+            error: isError ? r.output : undefined,
+          };
+        }
+
+        setOutputs(newOutputs);
+      } catch (err) {
+        if (abortSignal.aborted) return;
+        const errMsg = err instanceof Error ? err.message : "Compare failed";
+        setOutputs({
+          [modelA]: {
+            text: "",
+            tokens_in: 0,
+            tokens_out: 0,
+            latency: 0,
+            cost: "$0.00",
+            displayedText: "",
+            error: errMsg,
+          },
+          [modelB]: {
+            text: "",
+            tokens_in: 0,
+            tokens_out: 0,
+            latency: 0,
+            cost: "$0.00",
+            displayedText: "",
+            error: errMsg,
+          },
+        });
+      }
+    },
+    [prompt, systemPrompt, temperature, maxTokens, topP, getProviderForModel]
+  );
+
+  // --- Run handler ---
+  const handleRun = useCallback(async () => {
     if (!prompt.trim() || running) return;
+
+    // Abort any previous request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setRunning(true);
     setOutputs({});
 
-    // Clear any existing intervals
-    Object.values(intervalRefs.current).forEach(clearInterval);
+    try {
+      if (mode === "compare") {
+        await executeCompare(compareModelA, compareModelB, controller.signal);
 
-    if (mode === "compare") {
-      const modelsToRun = [compareModelA, compareModelB];
-      modelsToRun.forEach((m, i) => {
-        setTimeout(() => {
-          simulateStream(m, mockResponses[m] || defaultMockResponse);
-        }, i * 300);
-      });
+        // Add to history
+        const mcA = models.find((m) => m.id === compareModelA);
+        const mcB = models.find((m) => m.id === compareModelB);
+        setHistory((prev) => [
+          {
+            id: `h${Date.now()}`,
+            prompt: prompt.slice(0, 100),
+            model: `${mcA?.name || compareModelA} vs ${mcB?.name || compareModelB}`,
+            timestamp: new Date(),
+            tokens: 0,
+            latency: 0,
+            cost: "$0.00",
+          },
+          ...prev,
+        ]);
+      } else {
+        const providerName = getProviderForModel(model);
+        if (!providerName) {
+          setOutputs({
+            [model]: {
+              text: "",
+              tokens_in: 0,
+              tokens_out: 0,
+              latency: 0,
+              cost: "$0.00",
+              displayedText: "",
+              error: "No provider configured for this model. Add a provider in Route > Providers.",
+            },
+          });
+          return;
+        }
 
-      // Add to history
-      const resp = mockResponses[compareModelA] || defaultMockResponse;
-      setHistory((prev) => [
-        {
-          id: `h${Date.now()}`,
-          prompt: prompt.slice(0, 100),
-          model: `${compareModelA} vs ${compareModelB}`,
-          timestamp: new Date(),
-          tokens: resp.tokens,
-          latency: resp.latency,
-          cost: resp.cost,
-        },
-        ...prev,
-      ]);
+        await executeSingleStream(model, providerName, controller.signal);
 
-      setTimeout(() => setRunning(false), 1800);
-    } else {
-      const response = mockResponses[model] || defaultMockResponse;
-      simulateStream(model, response);
-
-      setHistory((prev) => [
-        {
-          id: `h${Date.now()}`,
-          prompt: prompt.slice(0, 100),
-          model,
-          timestamp: new Date(),
-          tokens: response.tokens,
-          latency: response.latency,
-          cost: response.cost,
-        },
-        ...prev,
-      ]);
-
-      setTimeout(() => setRunning(false), 800);
+        // Add to history with final output data
+        setOutputs((currentOutputs) => {
+          const out = currentOutputs[model];
+          if (out && !out.error) {
+            setHistory((prev) => [
+              {
+                id: `h${Date.now()}`,
+                prompt: prompt.slice(0, 100),
+                model: model,
+                timestamp: new Date(),
+                tokens: out.tokens_in + out.tokens_out,
+                latency: out.latency,
+                cost: out.cost,
+              },
+              ...prev,
+            ]);
+          }
+          return currentOutputs;
+        });
+      }
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      console.error("Playground execution error:", err);
+    } finally {
+      if (!controller.signal.aborted) {
+        setRunning(false);
+      }
     }
-  }, [prompt, running, mode, model, compareModelA, compareModelB, simulateStream]);
+  }, [
+    prompt,
+    running,
+    mode,
+    model,
+    compareModelA,
+    compareModelB,
+    models,
+    getProviderForModel,
+    executeSingleStream,
+    executeCompare,
+  ]);
 
   const handleCopy = useCallback((text: string, modelId?: string) => {
     navigator.clipboard.writeText(text);
@@ -582,6 +925,14 @@ export default function PlaygroundPage() {
     if (hours < 24) return `${hours}h ago`;
     return `${Math.floor(hours / 24)}d ago`;
   };
+
+  // Group models by provider for the select dropdown
+  const modelsByProvider = models.reduce<Record<string, ModelConfig[]>>((acc, m) => {
+    const key = m.providerDisplay;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(m);
+    return acc;
+  }, {});
 
   // --- Render ---
   return (
@@ -648,7 +999,32 @@ export default function PlaygroundPage() {
           </div>
         )}
 
-        {!loading && (
+        {/* No providers configured */}
+        {!loading && models.length === 0 && (
+          <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
+            <div className="w-16 h-16 rounded-2xl bg-[var(--bg-hover)] flex items-center justify-center">
+              <Sparkles className="w-8 h-8 text-[var(--text-tertiary)]" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+                No providers configured
+              </h2>
+              <p className="text-sm text-[var(--text-secondary)] mt-1 max-w-md">
+                {providersError
+                  ? `Could not load providers: ${providersError}`
+                  : "Add an LLM provider (OpenAI, Anthropic, etc.) in the Route > Providers page to start using the playground."}
+              </p>
+            </div>
+            <a
+              href="/dashboard/route/providers"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-[var(--accent-blue)] text-white hover:bg-[var(--accent-blue)]/90 transition-colors"
+            >
+              Configure Providers
+            </a>
+          </div>
+        )}
+
+        {!loading && models.length > 0 && (
           <div className="flex-1 flex gap-4 min-h-0">
             {/* Main Content */}
             <div className={cn("flex-1 flex flex-col min-w-0", historyOpen && "lg:mr-0")}>
@@ -702,7 +1078,7 @@ export default function PlaygroundPage() {
                   </Button>
                 </div>
 
-                {/* Content area — flexible layout */}
+                {/* Content area */}
                 <div className="flex-1 flex gap-4 min-h-0">
                   {/* Left column: System prompt + Prompt + Output */}
                   <div className="flex-1 flex flex-col gap-3 min-w-0 min-h-0">
@@ -748,75 +1124,74 @@ export default function PlaygroundPage() {
                       </AnimatePresence>
                     </motion.div>
 
-                    {/* Model selector row */}
+                    {/* Model selector row — Single mode */}
                     <TabsContent value="single" className="mt-0 shrink-0">
                       <div className="flex items-center gap-3">
                         <Select value={model} onValueChange={setModel}>
-                          <SelectTrigger className="w-[260px] h-9 bg-[var(--bg-secondary)] border-[var(--border-subtle)] text-sm">
+                          <SelectTrigger className="w-[280px] h-9 bg-[var(--bg-secondary)] border-[var(--border-subtle)] text-sm">
                             <SelectValue>
-                              <span className="flex items-center gap-2">
-                                <ProviderIcon
-                                  provider={MODELS.find((m) => m.id === model)?.provider || ""}
-                                  color={MODELS.find((m) => m.id === model)?.providerColor || "#666"}
-                                />
-                                <span className="text-[var(--text-primary)]">
-                                  {MODELS.find((m) => m.id === model)?.name || model}
-                                </span>
-                              </span>
+                              {(() => {
+                                const mc = models.find((m) => m.id === model);
+                                if (!mc) return model || "Select model";
+                                return (
+                                  <span className="flex items-center gap-2">
+                                    <ProviderIcon provider={mc.provider} color={mc.providerColor} />
+                                    <span className="text-[var(--text-primary)]">{mc.name}</span>
+                                  </span>
+                                );
+                              })()}
                             </SelectValue>
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--bg-tertiary)] border-[var(--border-default)]">
-                            {["OpenAI", "Anthropic", "Google", "Mistral", "Meta"].map((provider) => {
-                              const providerModels = MODELS.filter((m) => m.provider === provider);
-                              if (providerModels.length === 0) return null;
-                              return (
-                                <SelectGroup key={provider}>
-                                  <SelectLabel className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] pl-3 py-1">
-                                    {provider}
-                                  </SelectLabel>
-                                  {providerModels.map((m) => (
-                                    <SelectItem
-                                      key={m.id}
-                                      value={m.id}
-                                      className="focus:bg-[var(--bg-hover)] focus:text-[var(--text-primary)]"
-                                    >
-                                      <span className="flex items-center gap-2">
-                                        <ProviderIcon provider={m.provider} color={m.providerColor} />
-                                        <span>{m.name}</span>
-                                        {m.badge && (
-                                          <span className="text-[9px] px-1.5 py-0 rounded-full bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]">
-                                            {m.badge}
-                                          </span>
-                                        )}
-                                      </span>
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              );
-                            })}
+                            {Object.entries(modelsByProvider).map(([providerDisplay, providerModels]) => (
+                              <SelectGroup key={providerDisplay}>
+                                <SelectLabel className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] pl-3 py-1">
+                                  {providerDisplay}
+                                </SelectLabel>
+                                {providerModels.map((m) => (
+                                  <SelectItem
+                                    key={m.id}
+                                    value={m.id}
+                                    className="focus:bg-[var(--bg-hover)] focus:text-[var(--text-primary)]"
+                                  >
+                                    <span className="flex items-center gap-2">
+                                      <ProviderIcon provider={m.provider} color={m.providerColor} />
+                                      <span>{m.name}</span>
+                                      {m.badge && (
+                                        <span className="text-[9px] px-1.5 py-0 rounded-full bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]">
+                                          {m.badge}
+                                        </span>
+                                      )}
+                                    </span>
+                                  </SelectItem>
+                                ))}
+                              </SelectGroup>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
                     </TabsContent>
 
+                    {/* Model selector row — Compare mode */}
                     <TabsContent value="compare" className="mt-0 shrink-0">
                       <div className="flex items-center gap-3">
                         <Select value={compareModelA} onValueChange={setCompareModelA}>
                           <SelectTrigger className="flex-1 h-9 bg-[var(--bg-secondary)] border-[var(--border-subtle)] text-sm">
                             <SelectValue>
-                              <span className="flex items-center gap-2">
-                                <ProviderIcon
-                                  provider={MODELS.find((m) => m.id === compareModelA)?.provider || ""}
-                                  color={MODELS.find((m) => m.id === compareModelA)?.providerColor || "#666"}
-                                />
-                                <span className="text-[var(--text-primary)] text-xs">
-                                  {MODELS.find((m) => m.id === compareModelA)?.name || compareModelA}
-                                </span>
-                              </span>
+                              {(() => {
+                                const mc = models.find((m) => m.id === compareModelA);
+                                if (!mc) return compareModelA || "Select model";
+                                return (
+                                  <span className="flex items-center gap-2">
+                                    <ProviderIcon provider={mc.provider} color={mc.providerColor} />
+                                    <span className="text-[var(--text-primary)] text-xs">{mc.name}</span>
+                                  </span>
+                                );
+                              })()}
                             </SelectValue>
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--bg-tertiary)] border-[var(--border-default)]">
-                            {MODELS.map((m) => (
+                            {models.map((m) => (
                               <SelectItem
                                 key={m.id}
                                 value={m.id}
@@ -836,19 +1211,20 @@ export default function PlaygroundPage() {
                         <Select value={compareModelB} onValueChange={setCompareModelB}>
                           <SelectTrigger className="flex-1 h-9 bg-[var(--bg-secondary)] border-[var(--border-subtle)] text-sm">
                             <SelectValue>
-                              <span className="flex items-center gap-2">
-                                <ProviderIcon
-                                  provider={MODELS.find((m) => m.id === compareModelB)?.provider || ""}
-                                  color={MODELS.find((m) => m.id === compareModelB)?.providerColor || "#666"}
-                                />
-                                <span className="text-[var(--text-primary)] text-xs">
-                                  {MODELS.find((m) => m.id === compareModelB)?.name || compareModelB}
-                                </span>
-                              </span>
+                              {(() => {
+                                const mc = models.find((m) => m.id === compareModelB);
+                                if (!mc) return compareModelB || "Select model";
+                                return (
+                                  <span className="flex items-center gap-2">
+                                    <ProviderIcon provider={mc.provider} color={mc.providerColor} />
+                                    <span className="text-[var(--text-primary)] text-xs">{mc.name}</span>
+                                  </span>
+                                );
+                              })()}
                             </SelectValue>
                           </SelectTrigger>
                           <SelectContent className="bg-[var(--bg-tertiary)] border-[var(--border-default)]">
-                            {MODELS.map((m) => (
+                            {models.map((m) => (
                               <SelectItem
                                 key={m.id}
                                 value={m.id}
@@ -890,6 +1266,7 @@ export default function PlaygroundPage() {
                     <TabsContent value="single" className="mt-0 flex-1 min-h-0">
                       <OutputPanel
                         modelId={model}
+                        models={models}
                         output={outputs[model] || null}
                         isStreaming={running}
                         onCopy={(text) => handleCopy(text, model)}
@@ -901,6 +1278,7 @@ export default function PlaygroundPage() {
                       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 h-full">
                         <OutputPanel
                           modelId={compareModelA}
+                          models={models}
                           output={outputs[compareModelA] || null}
                           isStreaming={running}
                           onCopy={(text) => handleCopy(text, compareModelA)}
@@ -908,6 +1286,7 @@ export default function PlaygroundPage() {
                         />
                         <OutputPanel
                           modelId={compareModelB}
+                          models={models}
                           output={outputs[compareModelB] || null}
                           isStreaming={running}
                           onCopy={(text) => handleCopy(text, compareModelB)}
@@ -931,8 +1310,6 @@ export default function PlaygroundPage() {
                                 setTemperature(0.7);
                                 setMaxTokens(1024);
                                 setTopP(1.0);
-                                setFrequencyPenalty(0.0);
-                                setPresencePenalty(0.0);
                               }}
                               className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
                             >
@@ -997,26 +1374,6 @@ export default function PlaygroundPage() {
                         onChange={setTopP}
                         tooltip="Nucleus sampling. Controls diversity via cumulative probability cutoff."
                       />
-
-                      <ParamSlider
-                        label="Freq. Penalty"
-                        value={frequencyPenalty}
-                        min={0}
-                        max={2}
-                        step={0.1}
-                        onChange={setFrequencyPenalty}
-                        tooltip="Penalizes tokens based on how often they appear. Reduces repetition."
-                      />
-
-                      <ParamSlider
-                        label="Pres. Penalty"
-                        value={presencePenalty}
-                        min={0}
-                        max={2}
-                        step={0.1}
-                        onChange={setPresencePenalty}
-                        tooltip="Penalizes tokens based on whether they appear at all. Encourages new topics."
-                      />
                     </div>
                   </div>
                 </div>
@@ -1076,7 +1433,7 @@ export default function PlaygroundPage() {
                       ) : (
                         <div className="p-2 space-y-1">
                           {history.map((entry) => {
-                            const entryModel = MODELS.find((m) => m.id === entry.model);
+                            const entryModel = models.find((m) => m.id === entry.model);
                             return (
                               <button
                                 key={entry.id}
