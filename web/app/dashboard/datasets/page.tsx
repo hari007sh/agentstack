@@ -1,13 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Database,
   Plus,
-  Upload,
   Link2,
+  AlertCircle,
+  RefreshCw,
+  Trash2,
 } from "lucide-react";
 import {
   fadeIn,
@@ -33,8 +35,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { api, ApiError } from "@/lib/api";
+import { showSuccess, showError, showApiError } from "@/lib/toast";
 
-// --- Mock Data ---
+// --- Types ---
 interface Dataset {
   id: string;
   name: string;
@@ -46,38 +50,12 @@ interface Dataset {
   updated_at: string;
 }
 
-const mockDatasets: Dataset[] = [
-  {
-    id: "ds_001",
-    name: "Research Queries",
-    description: "Collection of academic research queries with expected summarization outputs.",
-    item_count: 150,
-    format: "json",
-    linked_suites: ["Research Agent Quality", "Citation Accuracy"],
-    created_at: "2026-02-20T10:00:00Z",
-    updated_at: "2026-03-18T14:30:00Z",
-  },
-  {
-    id: "ds_002",
-    name: "Code Review Samples",
-    description: "Sample code snippets with expected review feedback and severity ratings.",
-    item_count: 85,
-    format: "jsonl",
-    linked_suites: ["Code Review Accuracy"],
-    created_at: "2026-03-01T08:00:00Z",
-    updated_at: "2026-03-15T16:20:00Z",
-  },
-  {
-    id: "ds_003",
-    name: "Support Tickets",
-    description: "Real anonymized support tickets with ideal agent responses and resolution tags.",
-    item_count: 320,
-    format: "csv",
-    linked_suites: [],
-    created_at: "2026-03-10T12:00:00Z",
-    updated_at: "2026-03-19T09:45:00Z",
-  },
-];
+interface ListDatasetsResponse {
+  datasets: Dataset[];
+  total: number;
+  limit: number;
+  offset: number;
+}
 
 function formatDate(ts: string): string {
   return new Date(ts).toLocaleDateString("en-US", {
@@ -96,24 +74,111 @@ const formatColors: Record<string, string> = {
 export default function DatasetsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [total, setTotal] = useState(0);
+
+  // Create dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newFormat, setNewFormat] = useState("json");
 
-  useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 800);
-    return () => clearTimeout(timer);
+  // Delete confirmation state
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const initAuth = useCallback(() => {
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("auth_token");
+      if (token) {
+        api.setToken(token);
+      }
+    }
   }, []);
 
-  const isEmpty = !loading && mockDatasets.length === 0;
+  const fetchDatasets = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      initAuth();
+      const res = await api.get<ListDatasetsResponse>("/v1/datasets");
+      setDatasets(res.datasets || []);
+      setTotal(res.total || 0);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setError(err.message);
+        showApiError(err);
+      } else {
+        setError("Failed to load datasets");
+        showError("Failed to load datasets");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [initAuth]);
 
-  const handleCreate = () => {
-    setDialogOpen(false);
-    setNewName("");
-    setNewDescription("");
-    setNewFormat("json");
+  useEffect(() => {
+    fetchDatasets();
+  }, [fetchDatasets]);
+
+  const handleCreate = async () => {
+    if (!newName.trim()) {
+      showError("Dataset name is required");
+      return;
+    }
+    setCreating(true);
+    try {
+      initAuth();
+      await api.post("/v1/datasets", {
+        name: newName.trim(),
+        description: newDescription.trim(),
+        format: newFormat,
+      });
+      showSuccess("Dataset created successfully");
+      setDialogOpen(false);
+      setNewName("");
+      setNewDescription("");
+      setNewFormat("json");
+      await fetchDatasets();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        showApiError(err);
+      } else {
+        showError("Failed to create dataset");
+      }
+    } finally {
+      setCreating(false);
+    }
   };
+
+  const handleDelete = async (e: React.MouseEvent, datasetId: string) => {
+    e.stopPropagation();
+    if (deletingId === datasetId) {
+      // Second click confirms deletion
+      try {
+        initAuth();
+        await api.delete(`/v1/datasets/${datasetId}`);
+        showSuccess("Dataset deleted");
+        setDeletingId(null);
+        await fetchDatasets();
+      } catch (err) {
+        if (err instanceof ApiError) {
+          showApiError(err);
+        } else {
+          showError("Failed to delete dataset");
+        }
+        setDeletingId(null);
+      }
+    } else {
+      // First click sets confirm state
+      setDeletingId(datasetId);
+      // Auto-reset after 3 seconds
+      setTimeout(() => setDeletingId(null), 3000);
+    }
+  };
+
+  const isEmpty = !loading && !error && datasets.length === 0;
 
   return (
     <motion.div
@@ -131,10 +196,6 @@ export default function DatasetsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-2 px-3 py-2 rounded-lg border border-[var(--border-subtle)] text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-            <Upload className="w-4 h-4" />
-            Import
-          </button>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
               <button className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--accent-blue)] text-white text-sm font-medium hover:opacity-90 transition-opacity active:scale-[0.98]">
@@ -193,14 +254,16 @@ export default function DatasetsPage() {
                   variant="ghost"
                   onClick={() => setDialogOpen(false)}
                   className="text-[var(--text-secondary)]"
+                  disabled={creating}
                 >
                   Cancel
                 </Button>
                 <Button
                   onClick={handleCreate}
+                  disabled={creating || !newName.trim()}
                   className="bg-[var(--accent-blue)] text-white hover:bg-[var(--accent-blue)]/90"
                 >
-                  Create Dataset
+                  {creating ? "Creating..." : "Create Dataset"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -211,6 +274,30 @@ export default function DatasetsPage() {
       {/* Loading */}
       {loading && <SkeletonTable rows={3} cols={5} />}
 
+      {/* Error State */}
+      {!loading && error && (
+        <div className="rounded-xl border border-[var(--accent-red)]/20 bg-[var(--accent-red)]/5 p-6">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-[var(--accent-red)] flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-[var(--accent-red)]">
+                Failed to load datasets
+              </p>
+              <p className="text-xs text-[var(--text-tertiary)] mt-0.5">
+                {error}
+              </p>
+            </div>
+            <button
+              onClick={fetchDatasets}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-[var(--border-subtle)] text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Empty State */}
       {isEmpty && (
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-16 text-center">
@@ -218,14 +305,21 @@ export default function DatasetsPage() {
             <Database className="w-6 h-6 text-[var(--accent-purple)]" />
           </div>
           <h3 className="text-sm font-medium mb-1">No datasets yet</h3>
-          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto">
+          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto mb-4">
             Create or import a dataset to start building evaluation test suites.
           </p>
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--accent-blue)] text-white text-sm font-medium hover:opacity-90 transition-opacity active:scale-[0.98]"
+          >
+            <Plus className="w-4 h-4" />
+            Create Your First Dataset
+          </button>
         </div>
       )}
 
       {/* Table */}
-      {!loading && mockDatasets.length > 0 && (
+      {!loading && !error && datasets.length > 0 && (
         <motion.div
           variants={staggerContainer}
           initial="hidden"
@@ -236,10 +330,10 @@ export default function DatasetsPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[var(--border-subtle)]">
-                  {["Name", "Items", "Format", "Linked Suites", "Last Updated"].map(
+                  {["Name", "Items", "Format", "Linked Suites", "Last Updated", ""].map(
                     (header) => (
                       <th
-                        key={header}
+                        key={header || "actions"}
                         className="text-left px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium"
                       >
                         {header}
@@ -249,7 +343,7 @@ export default function DatasetsPage() {
                 </tr>
               </thead>
               <tbody>
-                {mockDatasets.map((ds) => {
+                {datasets.map((ds) => {
                   const fmtColor = formatColors[ds.format] || "var(--text-tertiary)";
                   return (
                     <motion.tr
@@ -269,7 +363,7 @@ export default function DatasetsPage() {
                         </div>
                       </td>
                       <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">
-                        {ds.item_count.toLocaleString()}
+                        {(ds.item_count || 0).toLocaleString()}
                       </td>
                       <td className="px-5 py-3">
                         <span
@@ -283,7 +377,7 @@ export default function DatasetsPage() {
                         </span>
                       </td>
                       <td className="px-5 py-3">
-                        {ds.linked_suites.length > 0 ? (
+                        {ds.linked_suites && ds.linked_suites.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
                             {ds.linked_suites.map((suite) => (
                               <div
@@ -302,7 +396,20 @@ export default function DatasetsPage() {
                         )}
                       </td>
                       <td className="px-5 py-3 text-xs text-[var(--text-tertiary)]">
-                        {formatDate(ds.updated_at)}
+                        {ds.updated_at ? formatDate(ds.updated_at) : "—"}
+                      </td>
+                      <td className="px-5 py-3">
+                        <button
+                          onClick={(e) => handleDelete(e, ds.id)}
+                          className={`p-1.5 rounded transition-colors ${
+                            deletingId === ds.id
+                              ? "bg-[var(--accent-red)]/10 text-[var(--accent-red)]"
+                              : "hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--accent-red)]"
+                          }`}
+                          title={deletingId === ds.id ? "Click again to confirm delete" : "Delete dataset"}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </td>
                     </motion.tr>
                   );
@@ -310,6 +417,15 @@ export default function DatasetsPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Total count footer */}
+          {total > 0 && (
+            <div className="px-5 py-3 border-t border-[var(--border-subtle)]">
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {total} dataset{total !== 1 ? "s" : ""} total
+              </span>
+            </div>
+          )}
         </motion.div>
       )}
     </motion.div>
