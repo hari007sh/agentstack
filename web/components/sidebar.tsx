@@ -105,7 +105,7 @@ export function Sidebar() {
 
       <aside
         className={cn(
-          "fixed left-0 top-0 h-screen border-r border-[var(--border-subtle)] bg-[var(--bg-secondary)] z-40 transition-all duration-200 flex flex-col",
+          "fixed left-0 top-0 h-screen border-r border-[var(--border-subtle)] bg-[var(--bg-sidebar,var(--bg-secondary))] z-40 transition-all duration-200 flex flex-col",
           collapsed ? "w-16" : "w-60",
           "max-lg:hidden"
         )}
