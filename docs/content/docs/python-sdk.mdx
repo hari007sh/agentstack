@@ -1,0 +1,500 @@
+---
+title: "Python SDK"
+description: "Complete reference for the AgentStack Python SDK — tracing, self-healing, guardrails, and cost tracking for AI agents."
+---
+
+## Installation
+
+```bash
+pip install agentstack
+```
+
+The SDK requires Python 3.9+ and depends on `requests>=2.28.0`.
+
+For auto-instrumentation support, install optional extras:
+
+```bash
+pip install agentstack[openai]      # OpenAI auto-instrumentation
+pip install agentstack[anthropic]   # Anthropic auto-instrumentation
+```
+
+## Initialization
+
+Call `agentstack.init()` once at application startup before creating any sessions or using decorators:
+
+```python
+import agentstack
+
+agentstack.init(
+    api_key="as_sk_your_key_here",
+    endpoint="http://localhost:8080",   # default
+    batch_size=50,                      # events per batch flush (default: 50)
+    flush_interval=5.0,                 # seconds between flushes (default: 5.0)
+    auto_instrument=["openai"],         # optional: auto-instrument libraries
+    debug=False,                        # enable debug logging
+)
+```
+
+### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `api_key` | `str` | *required* | Your AgentStack API key (format: `as_sk_...`) |
+| `endpoint` | `str` | `http://localhost:8080` | Base URL of the AgentStack API server |
+| `batch_size` | `int` | `50` | Number of events per batch flush |
+| `flush_interval` | `float` | `5.0` | Seconds between automatic batch flushes |
+| `auto_instrument` | `list[str] \| None` | `None` | Libraries to auto-instrument |
+| `debug` | `bool` | `False` | Enable debug-level logging |
+
+## Sessions
+
+Sessions represent a single agent execution. All spans and events are grouped within a session.
+
+### Context Manager (Recommended)
+
+```python
+with agentstack.session(agent_name="my-agent", tags={"env": "prod"}) as session:
+    # Create spans within the session
+    with session.span("step-1", span_type="llm_call") as span:
+        span.set_output("result")
+
+# Session is automatically started and ended
+```
+
+### Manual Lifecycle
+
+```python
+session = agentstack.create_session(
+    agent_name="my-agent",
+    metadata={"task": "summarization"},
+    tags={"env": "staging"},
+    user_id="user-123",
+)
+session.start()
+
+# ... create spans ...
+
+session.end()  # or session.end(error="something went wrong")
+```
+
+### Session Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_name` | `str` | `"default"` | Name of the agent running this session |
+| `metadata` | `dict \| None` | `None` | Arbitrary metadata attached to the session |
+| `tags` | `dict[str, str] \| None` | `None` | Key-value tags for filtering and grouping |
+| `user_id` | `str \| None` | `None` | End-user identifier |
+
+### Session Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `session.id` | `str` | UUID of the session |
+| `session.status` | `str` | `pending`, `running`, `completed`, or `failed` |
+| `session.total_tokens` | `int` | Sum of all span token counts |
+| `session.total_cost_cents` | `int` | Sum of all span costs in cents |
+| `session.spans` | `list[Span]` | All spans created in this session |
+| `session.duration_ms` | `float \| None` | Session duration in milliseconds |
+
+## Spans
+
+Spans represent individual units of work -- an LLM call, tool invocation, retrieval step, or custom operation.
+
+### Creating Spans
+
+```python
+with session.span("generate-answer", span_type="llm_call") as span:
+    span.set_input({"prompt": "What is AgentStack?"})
+    span.set_model("gpt-4o", provider="openai")
+
+    result = call_my_llm(...)
+
+    span.set_output(result)
+    span.set_tokens(input_tokens=150, output_tokens=80)
+    span.set_cost(cost_cents=2)
+```
+
+### Span Types
+
+| Type | Description |
+|------|-------------|
+| `llm_call` | Language model API call |
+| `tool_call` | External tool or function invocation |
+| `retrieval` | Vector search or document retrieval |
+| `chain` | A sequence of chained operations |
+| `agent` | Top-level agent orchestration |
+| `custom` | Any other operation |
+
+### Span Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `set_input` | `(data: Any) -> Span` | Set the input data |
+| `set_output` | `(data: Any) -> Span` | Set the output data |
+| `set_error` | `(error: Any) -> Span` | Record an error (sets status to `failed`) |
+| `set_tokens` | `(input_tokens: int, output_tokens: int) -> Span` | Set token usage |
+| `set_model` | `(model: str, provider: str \| None) -> Span` | Set the model and provider |
+| `set_cost` | `(cost_cents: int) -> Span` | Set cost in cents (integer) |
+| `set_metadata` | `(key: str, value: Any) -> Span` | Set a metadata key-value pair |
+| `child` | `(name: str, span_type: str, metadata: dict \| None) -> Span` | Create a nested child span |
+
+### Nested Spans
+
+Spans can be nested for complex workflows:
+
+```python
+with session.span("agent-run", span_type="agent") as agent_span:
+    with session.span("plan", span_type="llm_call") as plan_span:
+        plan_span.set_model("gpt-4o")
+        plan_span.set_output("Step 1: Search. Step 2: Summarize.")
+
+    with session.span("search", span_type="tool_call") as search_span:
+        search_span.set_input({"query": "latest news"})
+        search_span.set_output({"results": [...]})
+
+    with session.span("summarize", span_type="llm_call") as summarize_span:
+        summarize_span.set_model("gpt-4o-mini")
+        summarize_span.set_output("Here is the summary...")
+```
+
+## The `@trace` Decorator
+
+The `@trace` decorator automatically wraps functions as spans, capturing inputs, outputs, and errors:
+
+```python
+from agentstack import trace
+
+@trace(span_type="llm_call")
+def call_gpt(prompt: str) -> str:
+    response = openai.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content
+
+@trace(span_type="tool_call", capture_input=True, capture_output=True)
+def search_documents(query: str) -> list:
+    return vector_db.search(query)
+```
+
+### Decorator Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `name` | `str \| None` | Function name | Custom span name |
+| `span_type` | `str` | `"custom"` | Span type |
+| `capture_input` | `bool` | `True` | Capture function arguments as span input |
+| `capture_output` | `bool` | `True` | Capture return value as span output |
+| `metadata` | `dict \| None` | `None` | Static metadata to attach |
+| `healing` | `bool` | `False` | Enable Shield self-healing for this function |
+| `healing_config` | `HealingConfig \| None` | `None` | Custom healing configuration |
+
+### Async Support
+
+The `@trace` decorator works with both sync and async functions:
+
+```python
+@trace(span_type="llm_call")
+async def call_llm_async(prompt: str) -> str:
+    response = await openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.choices[0].message.content
+```
+
+### Using `@trace` with Sessions
+
+Decorated functions automatically attach to the current session:
+
+```python
+@trace(span_type="llm_call")
+def generate_response(prompt: str) -> str:
+    return "Hello!"
+
+with agentstack.session(agent_name="assistant") as session:
+    # This call creates a span inside the session
+    result = generate_response("Hi there")
+```
+
+When called outside a session, the function runs normally without tracing.
+
+## Auto-Instrumentation
+
+Auto-instrumentation patches supported libraries to automatically create spans for every API call, with zero code changes to your LLM calls.
+
+### Enabling at Init
+
+```python
+agentstack.init(
+    api_key="as_sk_...",
+    auto_instrument=["openai", "anthropic"],
+)
+```
+
+### Enabling Manually
+
+```python
+from agentstack.instruments import instrument
+
+instrumented = instrument(["openai", "anthropic", "langchain"])
+print(f"Instrumented: {instrumented}")
+```
+
+### Supported Libraries
+
+| Library | Key | What It Captures |
+|---------|-----|------------------|
+| OpenAI | `"openai"` | `chat.completions.create` (sync + async), model, tokens, cost, tool calls |
+| Anthropic | `"anthropic"` | `messages.create` (sync + async), model, tokens, cost, tool uses |
+| LangChain | `"langchain"` | Chain and agent executions |
+| CrewAI | `"crewai"` | Crew task executions |
+| LangGraph | `"langgraph"` | Graph node executions |
+
+### OpenAI Example
+
+Once instrumented, every OpenAI call automatically creates a span:
+
+```python
+import openai
+import agentstack
+
+agentstack.init(api_key="as_sk_...", auto_instrument=["openai"])
+
+client = openai.OpenAI()
+
+with agentstack.session(agent_name="chatbot") as session:
+    # This call is automatically traced — no manual span needed
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "Explain quantum computing"}],
+    )
+    print(response.choices[0].message.content)
+```
+
+The auto-instrumentation captures:
+- Model name and provider
+- Input/output token counts
+- Estimated cost in cents
+- Response content (truncated to 2000 chars)
+- Tool calls if present
+- Finish reason and latency
+
+### Anthropic Example
+
+```python
+import anthropic
+import agentstack
+
+agentstack.init(api_key="as_sk_...", auto_instrument=["anthropic"])
+
+client = anthropic.Anthropic()
+
+with agentstack.session(agent_name="assistant") as session:
+    response = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        messages=[{"role": "user", "content": "Write a haiku about code"}],
+    )
+    print(response.content[0].text)
+```
+
+## Shield (Self-Healing)
+
+Shield is AgentStack's self-healing engine that automatically detects and corrects agent failure modes in real-time, including loops, hallucinations, cost overruns, context overflow, and timeouts.
+
+### Enabling Shield
+
+```python
+agentstack.protect({
+    "loop_threshold": 3,
+    "cost_limit_cents": 500,
+    "model_fallback": "gpt-4o-mini",
+    "timeout_seconds": 30,
+    "context_summarize_at": 0.8,
+})
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | `bool` | `True` | Enable/disable healing |
+| `loop_threshold` | `int` | `3` | Break after N identical tool calls |
+| `cost_limit_cents` | `int` | `500` | Budget limit in cents ($5.00) |
+| `context_summarize_at` | `float` | `0.8` | Summarize at this fraction of context window |
+| `timeout_seconds` | `int` | `30` | Tool call timeout |
+| `timeout_retry` | `bool` | `True` | Retry on timeout before skipping |
+| `model_fallback` | `str \| None` | `None` | Cheaper model to switch to on cost limit |
+| `max_retries_per_step` | `int` | `2` | Max retries per step for error recovery |
+
+### Using Shield with `@trace`
+
+```python
+@trace(span_type="agent", healing=True)
+def run_agent(task: str) -> str:
+    # Shield automatically monitors this function for:
+    # - Loop detection (repeated identical calls)
+    # - Cost overruns (budget enforcement)
+    # - Hallucinations (calls to non-existent tools)
+    # - Timeouts (tool execution timeouts)
+    # - Context overflow (proactive summarization)
+    return agent.execute(task)
+```
+
+### Intervention Types
+
+| Type | Trigger | Action |
+|------|---------|--------|
+| `loop_break` | Agent calls same tool N times with identical params | Injects corrective prompt |
+| `cost_breaker` | Session cost exceeds limit | Switches to fallback model or raises `CostLimitExceeded` |
+| `hallucination_catch` | Agent calls non-existent tool | Provides list of valid tools |
+| `timeout_recovery` | Tool call times out | Retries once, then skips with fallback message |
+| `context_overflow` | Context usage exceeds threshold | Injects summarization instruction |
+
+### Using the HealingEngine Directly
+
+For advanced use cases, you can use the `HealingEngine` directly:
+
+```python
+from agentstack.healing import HealingEngine, HealingConfig
+
+config = HealingConfig(loop_threshold=3, cost_limit_cents=500)
+engine = HealingEngine(config=config, session=session)
+
+# Before each tool call
+correction = engine.before_tool_call("search", {"query": "foo"})
+if correction:
+    # Inject correction into agent prompt
+    pass
+
+# On tool error
+recovery = engine.on_tool_error("search", error, available_tools=["search", "read"])
+
+# After each LLM call
+engine.update_cost(cost_cents=12, tokens=1500)
+
+# Check context usage
+instruction = engine.check_context(current_tokens=95000, max_tokens=128000)
+
+# Get intervention summary
+summary = engine.get_summary()
+```
+
+## Cost Tracking
+
+Track costs for individual LLM calls:
+
+```python
+import agentstack.cost
+
+agentstack.cost.track(
+    model="gpt-4o",
+    input_tokens=1500,
+    output_tokens=800,
+    cost_cents=3,
+    session_id="session-uuid",
+    metadata={"task": "summarization"},
+)
+```
+
+Check budget status:
+
+```python
+budget = agentstack.cost.get_budget("budget-id")
+within_budget = agentstack.cost.check_budget("budget-id", cost_cents=10)
+```
+
+## Guard Checks
+
+Run content through guardrails (PII detection, toxicity, prompt injection):
+
+```python
+import agentstack.guard
+
+# Async
+result = await agentstack.guard.check(
+    content="User input text here",
+    rules=["pii-detector", "toxicity-filter"],
+    metadata={"session_id": "..."},
+)
+
+# Sync
+result = agentstack.guard.check_sync(
+    content="User input text here",
+    rules=["pii-detector"],
+)
+
+if result["passed"]:
+    print("Content is safe")
+else:
+    print("Violations found:", result["results"])
+```
+
+## Batch Sending Configuration
+
+The SDK batches events for efficient network usage. Events are sent when either the batch size threshold or flush interval is reached.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `batch_size` | `50` | Number of events that triggers an immediate flush |
+| `flush_interval` | `5.0s` | Maximum seconds between flushes |
+| Max queue size | `10,000` | Events beyond this limit are dropped with a warning |
+
+### Manual Flush and Shutdown
+
+```python
+# Force flush all pending events
+agentstack.flush()
+
+# Gracefully shut down (flushes remaining events)
+agentstack.shutdown()
+```
+
+The SDK automatically registers a shutdown hook via `atexit` to flush events when the process exits.
+
+## Complete Example
+
+```python
+import agentstack
+from openai import OpenAI
+
+# Initialize
+agentstack.init(
+    api_key="as_sk_your_key",
+    endpoint="http://localhost:8080",
+    auto_instrument=["openai"],
+)
+
+# Enable Shield
+agentstack.protect({
+    "loop_threshold": 3,
+    "cost_limit_cents": 1000,
+    "model_fallback": "gpt-4o-mini",
+})
+
+client = OpenAI()
+
+with agentstack.session(
+    agent_name="research-assistant",
+    tags={"env": "production"},
+    user_id="user-456",
+) as session:
+    # OpenAI calls are auto-instrumented
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You are a research assistant."},
+            {"role": "user", "content": "Summarize recent advances in AI agents."},
+        ],
+    )
+
+    # Manual span for a tool call
+    with session.span("save-result", span_type="tool_call") as span:
+        span.set_input({"content": response.choices[0].message.content})
+        save_to_database(response.choices[0].message.content)
+        span.set_output({"status": "saved"})
+
+print(f"Session: {session.id} | Tokens: {session.total_tokens}")
+```

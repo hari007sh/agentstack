@@ -1,0 +1,678 @@
+---
+title: "API Reference"
+description: "Complete REST API reference for the AgentStack platform — authentication, ingestion, query, guard, cost, test, and gateway endpoints."
+---
+
+## Base URL
+
+| Environment | URL |
+|-------------|-----|
+| Local development | `http://localhost:8080` |
+| Gateway proxy | `http://localhost:8090` |
+
+## Authentication
+
+All `/v1/*` endpoints support dual authentication -- either an API key or a JWT token.
+
+### API Key (SDKs and programmatic access)
+
+Pass your API key as a Bearer token:
+
+```bash
+curl -H "Authorization: Bearer as_sk_your_key_here" \
+  http://localhost:8080/v1/sessions
+```
+
+API keys use the format `as_sk_...` and are scoped to an organization.
+
+### JWT Token (Dashboard)
+
+After logging in via GitHub OAuth, the dashboard receives a JWT token:
+
+```bash
+curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+  http://localhost:8080/v1/sessions
+```
+
+### Dashboard-Only Endpoints
+
+Endpoints under `/api/*` require JWT authentication only (no API key support):
+
+```bash
+curl -H "Authorization: Bearer <jwt_token>" \
+  http://localhost:8080/api/api-keys
+```
+
+## Error Format
+
+All errors follow a consistent JSON format:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "content is required"
+  }
+}
+```
+
+Common error codes:
+
+| HTTP Status | Code | Description |
+|-------------|------|-------------|
+| 400 | `INVALID_BODY` | Malformed JSON request body |
+| 400 | `VALIDATION_ERROR` | Missing or invalid field |
+| 401 | `UNAUTHORIZED` | Missing or invalid auth header |
+| 401 | `INVALID_API_KEY` | API key is invalid or expired |
+| 429 | `RATE_LIMITED` | Too many requests (1000/minute default) |
+| 500 | `INGEST_ERROR` | Failed to queue data for ingestion |
+
+## Rate Limiting
+
+All `/v1/*` endpoints are rate-limited to **1000 requests per minute** per organization, enforced via Redis sliding window. When rate-limited, the response includes a `Retry-After` header.
+
+---
+
+## Health
+
+### GET /health
+
+Unauthenticated health check.
+
+```bash
+curl http://localhost:8080/health
+```
+
+```json
+{
+  "status": "healthy",
+  "version": "0.1.0",
+  "time": "2026-03-21T12:00:00Z"
+}
+```
+
+### GET /ready
+
+Readiness check with individual service health:
+
+```bash
+curl http://localhost:8080/ready
+```
+
+```json
+{
+  "status": "ready",
+  "checks": {
+    "postgres": "healthy",
+    "redis": "healthy",
+    "nats": "healthy"
+  }
+}
+```
+
+---
+
+## Auth
+
+### POST /auth/github
+
+Get a GitHub OAuth authorization URL.
+
+```bash
+curl -X POST http://localhost:8080/auth/github
+```
+
+```json
+{
+  "url": "https://github.com/login/oauth/authorize?client_id=...&state=..."
+}
+```
+
+### GET /auth/github/callback?code={code}
+
+Exchange a GitHub authorization code for a JWT token. On first login, creates a new organization, user, and default API key.
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs...",
+  "user": {
+    "id": "uuid",
+    "email": "user@example.com",
+    "name": "User Name",
+    "avatar_url": "https://avatars.githubusercontent.com/..."
+  }
+}
+```
+
+---
+
+## Trace: Ingestion
+
+### POST /v1/ingest/batch
+
+The primary ingestion endpoint used by SDKs. Accepts sessions, spans, and events in a single request. Data is queued to NATS for async writing to ClickHouse.
+
+```bash
+curl -X POST http://localhost:8080/v1/ingest/batch \
+  -H "Authorization: Bearer as_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sessions": [
+      {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "agent_name": "my-agent",
+        "status": "completed",
+        "metadata": "{\"task\": \"summarize\"}",
+        "tags": ["env:prod", "team:ml"],
+        "total_tokens": 1500,
+        "total_cost_cents": 3,
+        "total_spans": 2,
+        "duration_ms": 4500,
+        "started_at": "2026-03-21T12:00:00.000000Z",
+        "ended_at": "2026-03-21T12:00:04.500000Z"
+      }
+    ],
+    "spans": [
+      {
+        "id": "660e8400-e29b-41d4-a716-446655440001",
+        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+        "parent_id": "",
+        "name": "generate-response",
+        "span_type": "llm_call",
+        "status": "completed",
+        "input": "{\"prompt\": \"Hello\"}",
+        "output": "Hi there!",
+        "model": "gpt-4o",
+        "provider": "openai",
+        "input_tokens": 50,
+        "output_tokens": 20,
+        "total_tokens": 70,
+        "cost_cents": 1,
+        "duration_ms": 2000,
+        "metadata": "{}",
+        "started_at": "2026-03-21T12:00:00.000000Z",
+        "ended_at": "2026-03-21T12:00:02.000000Z"
+      }
+    ],
+    "events": [
+      {
+        "id": "770e8400-e29b-41d4-a716-446655440002",
+        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+        "type": "session.start",
+        "name": "session.start",
+        "data": "{\"projectId\": \"my-project\"}",
+        "created_at": "2026-03-21T12:00:00.000000Z"
+      }
+    ]
+  }'
+```
+
+Response (202 Accepted):
+
+```json
+{
+  "status": "accepted",
+  "sessions": 1,
+  "spans": 1,
+  "events": 1
+}
+```
+
+### POST /v1/ingest/sessions
+
+Ingest a single session.
+
+```json
+{
+  "id": "uuid",
+  "agent_name": "my-agent",
+  "status": "running",
+  "metadata": "{}",
+  "tags": ["env:prod"],
+  "started_at": "2026-03-21T12:00:00Z"
+}
+```
+
+### POST /v1/ingest/spans
+
+Ingest an array of spans.
+
+```json
+[
+  {
+    "id": "uuid",
+    "session_id": "session-uuid",
+    "name": "llm-call",
+    "span_type": "llm_call",
+    "status": "completed",
+    "model": "gpt-4o",
+    "provider": "openai",
+    "input_tokens": 100,
+    "output_tokens": 50,
+    "duration_ms": 1500,
+    "started_at": "2026-03-21T12:00:00Z",
+    "ended_at": "2026-03-21T12:00:01.500Z"
+  }
+]
+```
+
+Valid `span_type` values: `llm_call`, `tool_call`, `retrieval`, `chain`, `agent`, `custom`.
+
+### POST /v1/ingest/events
+
+Ingest an array of events.
+
+### POST /v1/ingest/healing
+
+Ingest a Shield healing event.
+
+```json
+{
+  "id": "uuid",
+  "session_id": "session-uuid",
+  "span_id": "span-uuid",
+  "type": "loop_break",
+  "trigger": "Output repeated 3/3 times",
+  "action": "modify_input",
+  "description": "Loop detected: output repeated 3 times",
+  "resolved": false,
+  "timestamp": "2026-03-21T12:00:03Z"
+}
+```
+
+---
+
+## Trace: Query
+
+### GET /v1/sessions
+
+List sessions with optional filtering.
+
+```bash
+curl -H "Authorization: Bearer as_sk_..." \
+  "http://localhost:8080/v1/sessions?limit=20&offset=0"
+```
+
+### GET /v1/sessions/{id}
+
+Get a single session by ID.
+
+### GET /v1/sessions/{id}/spans
+
+Get all spans for a session.
+
+### GET /v1/sessions/{id}/events
+
+Get all events for a session.
+
+### GET /v1/sessions/{id}/healing
+
+Get all healing events for a session.
+
+---
+
+## Trace: Analytics
+
+### GET /v1/analytics/overview
+
+Get aggregate overview metrics.
+
+```bash
+curl -H "Authorization: Bearer as_sk_..." \
+  "http://localhost:8080/v1/analytics/overview?period=24h"
+```
+
+### GET /v1/analytics/sessions-over-time
+
+Get session counts over time for charting.
+
+### GET /v1/analytics/failure-rate
+
+Get failure rate metrics.
+
+### GET /v1/analytics/healing
+
+Get Shield healing analytics.
+
+---
+
+## Trace: Agents
+
+CRUD operations for agent definitions.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/agents` | List agents |
+| POST | `/v1/agents` | Create an agent |
+| GET | `/v1/agents/{id}` | Get an agent |
+| PUT | `/v1/agents/{id}` | Update an agent |
+| DELETE | `/v1/agents/{id}` | Delete an agent |
+
+---
+
+## Trace: Failure Patterns
+
+CRUD operations for failure pattern definitions.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/patterns` | List patterns |
+| POST | `/v1/patterns` | Create a pattern |
+| GET | `/v1/patterns/{id}` | Get a pattern |
+| PUT | `/v1/patterns/{id}` | Update a pattern |
+| DELETE | `/v1/patterns/{id}` | Delete a pattern |
+
+---
+
+## Trace: Alerts
+
+CRUD operations for alert rules.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/alerts` | List alert rules |
+| POST | `/v1/alerts` | Create an alert rule |
+| GET | `/v1/alerts/{id}` | Get an alert rule |
+| PUT | `/v1/alerts/{id}` | Update an alert rule |
+| DELETE | `/v1/alerts/{id}` | Delete an alert rule |
+
+---
+
+## Test Module
+
+### Test Suites
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/test/suites` | List test suites |
+| POST | `/v1/test/suites` | Create a test suite |
+| GET | `/v1/test/suites/{id}` | Get a test suite |
+| PUT | `/v1/test/suites/{id}` | Update a test suite |
+| DELETE | `/v1/test/suites/{id}` | Delete a test suite |
+
+### Test Cases
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/test/suites/{suiteId}/cases` | List cases in a suite |
+| POST | `/v1/test/suites/{suiteId}/cases` | Create a test case |
+| GET | `/v1/test/cases/{id}` | Get a test case |
+| PUT | `/v1/test/cases/{id}` | Update a test case |
+| DELETE | `/v1/test/cases/{id}` | Delete a test case |
+
+### Test Runs
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/test/runs` | List test runs |
+| GET | `/v1/test/runs/{id}` | Get a test run (with results) |
+| POST | `/v1/test/suites/{suiteId}/run` | Start a test run for a suite |
+| POST | `/v1/test/ci/run` | CI/CD endpoint -- run tests and return pass/fail |
+
+### Evaluators
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/test/evaluators` | List evaluators |
+| POST | `/v1/test/evaluators` | Create an evaluator |
+| GET | `/v1/test/evaluators/{id}` | Get an evaluator |
+| PUT | `/v1/test/evaluators/{id}` | Update an evaluator |
+| DELETE | `/v1/test/evaluators/{id}` | Delete an evaluator |
+
+---
+
+## Guard Module
+
+### POST /v1/guard/check
+
+Run content through guardrails. Returns results for each guard check executed in parallel.
+
+```bash
+curl -X POST http://localhost:8080/v1/guard/check \
+  -H "Authorization: Bearer as_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "My email is john@example.com and my SSN is 123-45-6789",
+    "direction": "input",
+    "guardrail_ids": ["pii-detector", "toxicity-filter"],
+    "session_id": "optional-session-uuid"
+  }'
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `content` | `string` | Yes | Text content to check |
+| `direction` | `string` | No | `"input"` (default) or `"output"` |
+| `guardrail_ids` | `string[]` | No | Specific guardrails to run. If omitted, runs all active rules |
+| `session_id` | `string` | No | Associate results with a session |
+
+### Guard Rules
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/guard/rules` | List guardrail rules |
+| POST | `/v1/guard/rules` | Create a guardrail rule |
+| GET | `/v1/guard/rules/{id}` | Get a guardrail rule |
+| PUT | `/v1/guard/rules/{id}` | Update a guardrail rule |
+| DELETE | `/v1/guard/rules/{id}` | Delete a guardrail rule |
+
+### Guard Events and Analytics
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/guard/events` | List guard check events |
+| GET | `/v1/guard/analytics` | Guard analytics (block rate, top triggers) |
+
+---
+
+## Cost Module
+
+### POST /v1/cost/events
+
+Record cost event(s). Supports both single event and batch format.
+
+```bash
+curl -X POST http://localhost:8080/v1/cost/events \
+  -H "Authorization: Bearer as_sk_..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "session-uuid",
+    "span_id": "span-uuid",
+    "agent_name": "my-agent",
+    "model": "gpt-4o",
+    "provider": "openai",
+    "input_tokens": 1500,
+    "output_tokens": 800,
+    "total_tokens": 2300,
+    "cost_cents": 3,
+    "outcome": "success",
+    "metadata": {"task": "summarization"}
+  }'
+```
+
+Batch format:
+
+```json
+{
+  "events": [
+    { "model": "gpt-4o", "input_tokens": 100, "output_tokens": 50, "cost_cents": 1 },
+    { "model": "gpt-4o-mini", "input_tokens": 200, "output_tokens": 100, "cost_cents": 0 }
+  ]
+}
+```
+
+### GET /v1/cost/events
+
+List cost events.
+
+### Cost Analytics
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/cost/analytics/summary` | Overall cost summary |
+| GET | `/v1/cost/analytics/by-model` | Costs broken down by model |
+| GET | `/v1/cost/analytics/by-agent` | Costs broken down by agent |
+| GET | `/v1/cost/analytics/top-spenders` | Top cost-generating sessions/agents |
+| GET | `/v1/cost/analytics/compare` | Compare costs across models |
+
+### Budget Policies
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/cost/budgets` | List budget policies |
+| POST | `/v1/cost/budgets` | Create a budget policy |
+| GET | `/v1/cost/budgets/{id}` | Get a budget policy |
+| PUT | `/v1/cost/budgets/{id}` | Update a budget policy |
+| DELETE | `/v1/cost/budgets/{id}` | Delete a budget policy |
+
+### Model Pricing
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/cost/models` | List model pricing entries |
+| PUT | `/v1/cost/models` | Upsert model pricing |
+
+---
+
+## Gateway (Route Module)
+
+### Providers
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/gateway/providers` | List LLM providers |
+| POST | `/v1/gateway/providers` | Add a provider (API key encrypted with AES-256-GCM) |
+| GET | `/v1/gateway/providers/{id}` | Get a provider |
+| PUT | `/v1/gateway/providers/{id}` | Update a provider |
+| DELETE | `/v1/gateway/providers/{id}` | Delete a provider |
+
+### Routing Rules
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/gateway/routes` | List routing rules |
+| POST | `/v1/gateway/routes` | Create a routing rule |
+| PUT | `/v1/gateway/routes/{id}` | Update a routing rule |
+| DELETE | `/v1/gateway/routes/{id}` | Delete a routing rule |
+
+### Fallback Chains
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/gateway/fallbacks` | List fallback chains |
+| POST | `/v1/gateway/fallbacks` | Create a fallback chain |
+| GET | `/v1/gateway/fallbacks/{id}` | Get a fallback chain |
+| PUT | `/v1/gateway/fallbacks/{id}` | Update a fallback chain |
+| DELETE | `/v1/gateway/fallbacks/{id}` | Delete a fallback chain |
+
+### Cache and Analytics
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/gateway/cache/stats` | Semantic cache statistics |
+| POST | `/v1/gateway/cache/purge` | Purge the semantic cache |
+| GET | `/v1/gateway/analytics` | Gateway request analytics |
+
+---
+
+## Datasets
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/datasets` | Create a dataset |
+| GET | `/v1/datasets` | List datasets |
+| GET | `/v1/datasets/{id}` | Get a dataset |
+| PATCH | `/v1/datasets/{id}` | Update a dataset |
+| DELETE | `/v1/datasets/{id}` | Delete a dataset |
+| POST | `/v1/datasets/{id}/link/{suiteID}` | Link a dataset to a test suite |
+| DELETE | `/v1/datasets/{id}/link/{suiteID}` | Unlink a dataset from a test suite |
+| POST | `/v1/datasets/{id}/items` | Add an item |
+| POST | `/v1/datasets/{id}/items/batch` | Add items in batch |
+| GET | `/v1/datasets/{id}/items` | List items |
+| GET | `/v1/datasets/{id}/items/{itemID}` | Get an item |
+| DELETE | `/v1/datasets/{id}/items/{itemID}` | Delete an item |
+| POST | `/v1/datasets/{id}/import` | Import items (CSV/JSON) |
+| GET | `/v1/datasets/{id}/export` | Export items |
+| POST | `/v1/datasets/from-session/{sessionID}` | Create dataset from a production session |
+
+---
+
+## Prompts
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/prompts` | Create a prompt |
+| GET | `/v1/prompts` | List prompts |
+| GET | `/v1/prompts/{id}` | Get a prompt by ID |
+| GET | `/v1/prompts/slug/{slug}` | Get a prompt by slug |
+| PATCH | `/v1/prompts/{id}` | Update a prompt |
+| DELETE | `/v1/prompts/{id}` | Delete a prompt |
+| POST | `/v1/prompts/{id}/versions` | Create a new version |
+| GET | `/v1/prompts/{id}/versions` | List versions |
+| GET | `/v1/prompts/{id}/versions/{version}` | Get a specific version |
+| POST | `/v1/prompts/{id}/deploy/{version}` | Deploy a version |
+| POST | `/v1/prompts/{id}/rollback` | Rollback to previous version |
+
+---
+
+## Playground
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/playground/execute` | Execute a prompt against a provider |
+| POST | `/v1/playground/compare` | Compare a prompt across multiple providers/models |
+
+---
+
+## Webhooks
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/webhooks` | Create a webhook |
+| GET | `/v1/webhooks` | List webhooks |
+| GET | `/v1/webhooks/{id}` | Get a webhook |
+| PATCH | `/v1/webhooks/{id}` | Update a webhook |
+| DELETE | `/v1/webhooks/{id}` | Delete a webhook |
+| POST | `/v1/webhooks/{id}/test` | Send a test delivery |
+| GET | `/v1/webhooks/{id}/deliveries` | List deliveries |
+| POST | `/v1/webhooks/{id}/deliveries/{deliveryID}/retry` | Retry a delivery |
+
+---
+
+## OTLP (OpenTelemetry)
+
+### POST /v1/otlp/v1/traces
+
+Receive OpenTelemetry trace data in OTLP format. Translates OTLP spans to AgentStack spans and ingests them.
+
+---
+
+## Dashboard API
+
+These endpoints require JWT authentication (dashboard login).
+
+### Organization
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/org` | Get current organization |
+| PATCH | `/api/org` | Update organization |
+| DELETE | `/api/org` | Delete organization |
+| GET | `/api/org/usage` | Get usage metrics |
+
+### API Keys
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/api-keys` | List API keys (shows prefix only) |
+| POST | `/api/api-keys` | Create a new API key (returns full key once) |
+| DELETE | `/api/api-keys/{id}` | Revoke an API key |
+
+### Team Management
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/team` | List team members |
+| POST | `/api/team/invite` | Invite a team member |
+| PATCH | `/api/team/{id}/role` | Update a member's role |
+| DELETE | `/api/team/{id}` | Remove a team member |

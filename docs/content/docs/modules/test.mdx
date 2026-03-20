@@ -1,0 +1,371 @@
+---
+title: Test (Evaluation)
+description: Test provides automated evaluation of AI agents with 15+ evaluators, CI/CD quality gates, regression testing, and a CLI tool.
+---
+
+# Test (Evaluation)
+
+Test is AgentStack's evaluation module. It lets you define test suites with test cases, run them against evaluators, and gate CI/CD deploys on the results. Production trace sessions can be converted into test cases for automatic regression testing.
+
+## Overview
+
+Test gives you:
+
+- **Test Suites**: Collections of test cases grouped by agent or feature.
+- **Test Cases**: Individual test inputs with expected outputs and assigned evaluators.
+- **Evaluators**: Scoring functions that grade agent outputs (LLM judges, programmatic checks, composites).
+- **Test Runs**: Asynchronous execution of a suite, producing per-case scores and a pass/fail result.
+- **CI/CD Integration**: Synchronous endpoint for CI pipelines and a CLI tool for gating deploys.
+
+## How It Works
+
+### Evaluator Types
+
+There are three categories of evaluators:
+
+| Type | Subtype Examples | How It Works |
+|------|-----------------|--------------|
+| `llm_judge` | relevance, conciseness, correctness, toxicity, hallucination, custom | Sends the input/output to an LLM with a scoring rubric |
+| `programmatic` | exact_match, contains, regex, json_valid, length, latency | Deterministic code-based checks |
+| `composite` | weighted_average, all_pass, any_pass | Combines results from multiple evaluators |
+
+AgentStack ships with 15 pre-built evaluators seeded from `seed/evaluators.json`. Built-in evaluators cannot be modified or deleted.
+
+### Available Built-in Evaluators
+
+**LLM Judge Evaluators:**
+- **Relevance** -- Does the output answer the input question?
+- **Conciseness** -- Is the output concise without unnecessary content?
+- **Correctness** -- Is the output factually correct given the context?
+- **Toxicity** -- Does the output contain toxic or harmful content?
+- **Hallucination** -- Does the output contain fabricated information?
+- **Helpfulness** -- Is the output actually helpful to the user?
+
+**Programmatic Evaluators:**
+- **Exact Match** -- Output exactly matches expected output
+- **Contains** -- Output contains expected substring(s)
+- **Regex Match** -- Output matches a regex pattern
+- **JSON Valid** -- Output is valid JSON
+- **Length Check** -- Output length is within bounds
+- **Latency Check** -- Response time is within threshold
+
+**Composite Evaluators:**
+- **Weighted Average** -- Combines multiple evaluator scores with weights
+- **All Pass** -- All sub-evaluators must pass
+- **Any Pass** -- At least one sub-evaluator must pass
+
+### Test Cases
+
+Each test case specifies:
+
+| Field | Description |
+|-------|-------------|
+| `name` | Descriptive name |
+| `input` | The input to send to the agent (JSON) |
+| `expected_output` | The expected output for comparison (JSON, optional) |
+| `context` | Additional context for evaluators (JSON, optional) |
+| `evaluator_ids` | List of evaluator IDs to run against this case |
+| `tags` | Tags for filtering |
+| `created_from_session` | Session ID if this case was auto-generated from a production session |
+
+### Test Runs
+
+When a test run is started:
+
+1. The runner creates a `test_run` record with status `running`.
+2. It loads all test cases for the suite.
+3. For each case, it runs all assigned evaluators and records scores.
+4. The run is updated with aggregate results: `passed_cases`, `failed_cases`, `error_cases`, `avg_score`.
+5. Status is set to `completed` or `failed`.
+
+Runs execute asynchronously by default: the API publishes a message to NATS subject `test.run.execute`, and the test executor worker picks it up. If NATS is unavailable, execution falls back to a goroutine.
+
+### CI/CD Integration
+
+The `POST /v1/test/ci/run` endpoint executes a test run **synchronously** and returns the results when complete. This is designed for CI/CD pipelines:
+
+```bash
+# In your CI pipeline
+RESULT=$(curl -s -X POST http://localhost:8080/v1/test/ci/run \
+  -H "Authorization: Bearer $AGENTSTACK_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"suite_id\": \"suite_abc123\",
+    \"commit_sha\": \"$GIT_SHA\",
+    \"branch\": \"$GIT_BRANCH\",
+    \"repo\": \"$REPO_NAME\"
+  }")
+
+PASSED=$(echo $RESULT | jq -r '.passed')
+if [ "$PASSED" != "true" ]; then
+  echo "Quality gate failed!"
+  exit 1
+fi
+```
+
+### CLI Tool
+
+The `agentstack` CLI provides test commands:
+
+```bash
+# Run a test suite
+agentstack test run --suite suite_abc123
+
+# Check run status
+agentstack test status --run run_xyz789
+
+# Gate a deploy (exits non-zero if tests fail)
+agentstack test gate --suite suite_abc123
+```
+
+## API Reference
+
+### Create Test Suite
+
+```
+POST /v1/test/suites
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "Customer Support Agent Tests",
+  "description": "Regression tests for the support agent",
+  "agent_id": "agent_abc123",
+  "tags": ["support", "regression"]
+}
+```
+
+Response (`201 Created`): the created suite object.
+
+### List Test Suites
+
+```
+GET /v1/test/suites
+Authorization: Bearer as_sk_your_key
+```
+
+### Get Test Suite
+
+```
+GET /v1/test/suites/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+### Update Test Suite
+
+```
+PUT /v1/test/suites/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+### Delete Test Suite
+
+```
+DELETE /v1/test/suites/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+### Create Test Case
+
+```
+POST /v1/test/suites/{suiteId}/cases
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "Password reset question",
+  "description": "User asks about password reset",
+  "input": {"message": "How do I reset my password?"},
+  "expected_output": {"intent": "password_reset"},
+  "context": {"user_tier": "premium"},
+  "evaluator_ids": ["eval_relevance", "eval_conciseness"],
+  "tags": ["password", "faq"]
+}
+```
+
+**Validation**: `name` and `input` are required.
+
+### List Test Cases
+
+```
+GET /v1/test/suites/{suiteId}/cases
+Authorization: Bearer as_sk_your_key
+```
+
+### Get Test Case
+
+```
+GET /v1/test/cases/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+### Update Test Case
+
+```
+PUT /v1/test/cases/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+### Delete Test Case
+
+```
+DELETE /v1/test/cases/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+### List Evaluators
+
+```
+GET /v1/test/evaluators
+Authorization: Bearer as_sk_your_key
+```
+
+Returns both built-in and custom evaluators.
+
+### Create Custom Evaluator
+
+```
+POST /v1/test/evaluators
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "Domain accuracy",
+  "description": "Checks domain-specific accuracy using LLM judge",
+  "type": "llm_judge",
+  "subtype": "custom",
+  "config": {
+    "prompt": "Rate the accuracy of the following response on a scale of 0-1...",
+    "model": "gpt-4o",
+    "threshold": 0.7
+  }
+}
+```
+
+| Field | Required | Valid Values |
+|-------|----------|-------------|
+| `name` | Yes | Any string |
+| `type` | Yes | `llm_judge`, `programmatic`, `composite` |
+| `subtype` | No | Type-specific subtype string |
+| `config` | No (default: `{}`) | Type-specific JSON configuration |
+
+Built-in evaluators cannot be modified or deleted (returns `403 Forbidden`).
+
+### Start Test Run (Async)
+
+```
+POST /v1/test/suites/{suiteId}/run
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+{
+  "metadata": {"triggered_by": "manual"}
+}
+```
+
+Response (`202 Accepted`):
+
+```json
+{
+  "run": {
+    "id": "run_xyz789",
+    "suite_id": "suite_abc123",
+    "status": "running",
+    "created_at": "2025-01-15T10:00:00Z"
+  },
+  "message": "test run started"
+}
+```
+
+### Get Test Run
+
+```
+GET /v1/test/runs/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+Returns the run with aggregate results:
+
+```json
+{
+  "id": "run_xyz789",
+  "suite_id": "suite_abc123",
+  "status": "completed",
+  "total_cases": 25,
+  "passed_cases": 23,
+  "failed_cases": 2,
+  "error_cases": 0,
+  "avg_score": 0.87,
+  "duration_ms": 12400,
+  "created_at": "2025-01-15T10:00:00Z",
+  "completed_at": "2025-01-15T10:00:12.400Z"
+}
+```
+
+### List Test Runs
+
+```
+GET /v1/test/runs?suite_id=suite_abc123
+Authorization: Bearer as_sk_your_key
+```
+
+### CI/CD Run (Synchronous)
+
+```
+POST /v1/test/ci/run
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+{
+  "suite_id": "suite_abc123",
+  "commit_sha": "abc123def",
+  "branch": "main",
+  "repo": "my-org/my-agent"
+}
+```
+
+Response (`200 OK`):
+
+```json
+{
+  "run": { ... },
+  "passed": true
+}
+```
+
+The `passed` field is `true` only when status is `completed` AND both `failed_cases` and `error_cases` are zero.
+
+## Dashboard Guide
+
+### Test Overview (`/dashboard/test`)
+
+Displays:
+- **Metric cards**: Total suites, total runs, average score, pass rate.
+- **Recent runs table**: Latest test runs with suite name, status, score, passed/failed counts, and duration.
+- **Score trend chart**: Average score over time across all suites.
+
+### Suite Detail (`/dashboard/test/suites/{id}`)
+
+Shows the suite with all its test cases. From here you can:
+- Add/edit/delete test cases
+- Assign evaluators to cases
+- Start a new run
+- View run history for this suite
+
+### Run Detail (`/dashboard/test/runs/{id}`)
+
+Shows the detailed results:
+- Progress bar with passed/failed/error counts
+- Per-case results table with evaluator scores
+- Score distribution chart
+- Duration and metadata

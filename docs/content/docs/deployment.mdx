@@ -1,0 +1,278 @@
+---
+title: Deployment
+description: Deploy AgentStack locally with Docker Compose or to production with the provided Dockerfiles and production compose file.
+---
+
+# Deployment
+
+AgentStack can be deployed locally for development using Docker Compose, or to production using the provided multi-stage Dockerfiles and production compose file.
+
+## Local Development (Docker Compose)
+
+### Prerequisites
+
+- Docker and Docker Compose
+- Go 1.22+
+- Node.js 20+
+
+### 1. Start Infrastructure Services
+
+```bash
+docker compose up -d
+```
+
+This starts PostgreSQL, ClickHouse, Redis, and NATS:
+
+| Service | Container Port | Host Port | Purpose |
+|---------|---------------|-----------|---------|
+| PostgreSQL | 5432 | 5436 | Config database |
+| ClickHouse | 9000, 8123 | 9000, 8123 | Time-series storage |
+| Redis | 6379 | 6379 | Cache, rate limiting |
+| NATS | 4222, 8222 | 4222, 8222 | Event streaming |
+
+### 2. Configure Environment
+
+```bash
+cp .env.example .env
+# Edit .env with your values
+```
+
+### 3. Run Migrations
+
+```bash
+make migrate
+```
+
+### 4. Seed Data
+
+```bash
+make seed
+```
+
+This loads failure patterns, evaluators, guardrails, and model pricing from the `seed/` directory.
+
+### 5. Start the API Server
+
+```bash
+make dev
+```
+
+The API server starts on port 8080.
+
+### 6. Start the Gateway Proxy (optional)
+
+```bash
+go run ./cmd/gateway
+```
+
+The gateway proxy starts on port 8090.
+
+### 7. Start the Worker (optional)
+
+```bash
+go run ./cmd/worker
+```
+
+### 8. Start the Dashboard
+
+```bash
+cd web && npm install && npm run dev
+```
+
+The dashboard starts on port 3000.
+
+### Verify
+
+```bash
+# Health check
+curl http://localhost:8080/health
+
+# Check services
+docker compose ps
+```
+
+## Production Deployment
+
+AgentStack provides three Dockerfiles and a production Docker Compose file in the `deploy/` directory.
+
+### Dockerfiles
+
+**`deploy/Dockerfile`** -- Multi-stage Go build for the API server, worker, and migration runner:
+
+```dockerfile
+FROM golang:1.22-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /server ./cmd/server
+RUN CGO_ENABLED=0 go build -o /worker ./cmd/worker
+RUN CGO_ENABLED=0 go build -o /migrate ./cmd/migrate
+
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /server /server
+COPY --from=builder /worker /worker
+COPY --from=builder /migrate /migrate
+COPY migrations/ /migrations/
+COPY seed/ /seed/
+EXPOSE 8080
+CMD ["/server"]
+```
+
+The same image runs as server, worker, or migration runner depending on the command.
+
+**`deploy/Dockerfile.gateway`** -- Gateway proxy binary:
+
+```dockerfile
+FROM golang:1.22-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /gateway ./cmd/gateway
+
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
+COPY --from=builder /gateway /gateway
+EXPOSE 8090
+CMD ["/gateway"]
+```
+
+**`deploy/Dockerfile.web`** -- Next.js dashboard:
+
+```dockerfile
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY web/package.json web/package-lock.json* ./
+RUN npm ci
+
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY web/ .
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+USER nextjs
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+### Production Docker Compose
+
+The `deploy/docker-compose.prod.yml` defines all seven services:
+
+| Service | Image Source | Port | Depends On |
+|---------|-------------|------|------------|
+| `postgres` | `postgres:16` | 5432 | -- |
+| `clickhouse` | `clickhouse/clickhouse-server:latest` | 9000, 8123 | -- |
+| `redis` | `redis:7-alpine` | 6379 | -- |
+| `nats` | `nats:latest` | 4222, 8222 | -- |
+| `migrate` | `deploy/Dockerfile` | -- | postgres, clickhouse |
+| `server` | `deploy/Dockerfile` | 8080 | migrate, redis, nats |
+| `worker` | `deploy/Dockerfile` | -- | migrate, redis, nats |
+| `gateway` | `deploy/Dockerfile.gateway` | 8090 | migrate, redis, nats |
+| `web` | `deploy/Dockerfile.web` | 3000 | server |
+
+The migrate service runs first (with `condition: service_completed_successfully`), then the application services start.
+
+### Deploy with Production Compose
+
+```bash
+cd deploy
+
+# Set required environment variables
+export POSTGRES_PASSWORD=your_secure_password
+export REDIS_PASSWORD=your_secure_password
+export JWT_SECRET=your_jwt_secret_at_least_32_chars
+export ENCRYPTION_KEY=your_64_char_hex_string_for_aes256
+export GITHUB_CLIENT_ID=your_github_oauth_client_id
+export GITHUB_CLIENT_SECRET=your_github_oauth_client_secret
+export FRONTEND_URL=https://your-domain.com
+
+# Start everything
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+### Health Checks
+
+All infrastructure services have health checks configured:
+
+- **PostgreSQL**: `pg_isready -U agentstack`
+- **ClickHouse**: `clickhouse-client --query "SELECT 1"`
+- **Redis**: `redis-cli -a $REDIS_PASSWORD ping`
+- **NATS**: `wget --spider -q http://localhost:8222/healthz`
+
+Application services wait for their dependencies to be healthy before starting.
+
+## Environment Variables Reference
+
+### Server Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | API server port |
+| `GATEWAY_PORT` | `8090` | Gateway proxy port |
+| `ENVIRONMENT` | `development` | Environment name (`development`, `production`) |
+
+### Database Connections
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgresql://agentstack:agentstack_dev@localhost:5432/agentstack?sslmode=disable` | PostgreSQL connection string |
+| `CLICKHOUSE_URL` | `clickhouse://localhost:9000/agentstack` | ClickHouse native protocol URL |
+| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
+| `NATS_URL` | `nats://localhost:4222` | NATS connection URL |
+
+### Authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GITHUB_CLIENT_ID` | -- | GitHub OAuth application client ID |
+| `GITHUB_CLIENT_SECRET` | -- | GitHub OAuth application client secret |
+| `JWT_SECRET` | `dev-secret-change-in-production` | Secret for signing JWT tokens (change in production) |
+
+### Frontend
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FRONTEND_URL` | `http://localhost:3000` | Dashboard URL (used for CORS and OAuth callbacks) |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8080` | API server URL (used by the Next.js dashboard) |
+
+### Email (Alerts)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SENDGRID_API_KEY` | -- | SendGrid API key for sending alert emails |
+| `FROM_EMAIL` | `alerts@agentstack.dev` | Sender email for alerts |
+
+### Encryption
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENCRYPTION_KEY` | -- | 32-byte hex string (64 characters) for AES-256-GCM encryption of provider API keys |
+
+## Production Checklist
+
+Before going to production, ensure:
+
+- [ ] `JWT_SECRET` is set to a strong random value (not the default)
+- [ ] `ENCRYPTION_KEY` is set to a cryptographically random 64-character hex string
+- [ ] `POSTGRES_PASSWORD` and `REDIS_PASSWORD` are strong and unique
+- [ ] `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` are configured for your OAuth app
+- [ ] `FRONTEND_URL` points to your actual dashboard domain
+- [ ] PostgreSQL has `sslmode=require` in production
+- [ ] Redis has `requirepass` set
+- [ ] NATS has authentication configured
+- [ ] A reverse proxy (nginx, Caddy, or cloud load balancer) handles TLS termination
+- [ ] Backup strategy is in place for PostgreSQL and ClickHouse volumes

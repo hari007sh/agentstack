@@ -1,4 +1,16 @@
 {
   "title": "Documentation",
-  "pages": ["---Getting Started---", "index"]
+  "pages": [
+    "index",
+    "getting-started",
+    "architecture",
+    "---SDKs---",
+    "python-sdk",
+    "typescript-sdk",
+    "---Modules---",
+    "...modules",
+    "---Reference---",
+    "api-reference",
+    "deployment"
+  ]
 }

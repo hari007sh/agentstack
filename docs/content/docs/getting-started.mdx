@@ -1,0 +1,190 @@
+---
+title: "Getting Started"
+description: "Set up AgentStack locally and send your first session trace in under 10 minutes."
+---
+
+## Prerequisites
+
+Before you begin, make sure you have the following installed:
+
+- **Docker** and **Docker Compose** (for PostgreSQL, ClickHouse, Redis, NATS)
+- **Go 1.22+** (for the API server and gateway)
+- **Node.js 18+** and **npm** (for the dashboard)
+- **Python 3.9+** (for the Python SDK)
+- **Git**
+
+## Clone and Setup
+
+Clone the repository and start the infrastructure services:
+
+```bash
+git clone https://github.com/agentstack/agentstack.git
+cd agentstack
+```
+
+Copy the environment file and configure it:
+
+```bash
+cp .env.example .env
+```
+
+Start the infrastructure services (PostgreSQL, ClickHouse, Redis, NATS):
+
+```bash
+docker compose up -d
+```
+
+Wait for all services to be healthy:
+
+```bash
+docker compose ps
+```
+
+You should see all four services running: `postgres` (port 5432), `clickhouse` (ports 9000/8123), `redis` (port 6379), and `nats` (port 4222).
+
+## Run Database Migrations
+
+Apply all database migrations:
+
+```bash
+make migrate
+```
+
+Seed the database with pre-built failure patterns, evaluators, guardrails, and model pricing:
+
+```bash
+make seed
+```
+
+## Start the Servers
+
+Start the Go API server (port 8080):
+
+```bash
+make dev
+```
+
+In a separate terminal, start the Next.js dashboard (port 3000):
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Verify the API server is running:
+
+```bash
+curl http://localhost:8080/health
+```
+
+Expected response:
+
+```json
+{
+  "status": "healthy",
+  "version": "0.1.0",
+  "time": "2026-03-21T12:00:00Z"
+}
+```
+
+## First Login (GitHub OAuth)
+
+Open [http://localhost:3000](http://localhost:3000) in your browser. Click **Sign in with GitHub** to authenticate.
+
+On first login, AgentStack automatically creates:
+- A personal **organization** for your account
+- A **default API key** for SDK access
+
+If GitHub OAuth is not configured in your `.env`, you can set it up by creating a GitHub OAuth App and adding the credentials:
+
+```bash
+GITHUB_CLIENT_ID=your_client_id
+GITHUB_CLIENT_SECRET=your_client_secret
+```
+
+## Create Your First API Key
+
+Navigate to **Settings > API Keys** in the dashboard, or use the default key created during login.
+
+API keys use the format `as_sk_...` and are passed as Bearer tokens in the `Authorization` header.
+
+You can also manage API keys via the dashboard API:
+
+```bash
+# List API keys (requires JWT from dashboard login)
+curl -H "Authorization: Bearer <jwt_token>" http://localhost:8080/api/api-keys
+```
+
+## Install the Python SDK
+
+```bash
+pip install agentstack
+```
+
+For auto-instrumentation of specific libraries, install optional dependencies:
+
+```bash
+pip install agentstack[openai]      # OpenAI auto-instrumentation
+pip install agentstack[anthropic]   # Anthropic auto-instrumentation
+```
+
+## Send Your First Session Trace
+
+Create a file called `quickstart.py`:
+
+```python
+import agentstack
+
+# Initialize the SDK with your API key
+agentstack.init(
+    api_key="as_sk_your_key_here",
+    endpoint="http://localhost:8080",
+)
+
+# Create a tracing session
+with agentstack.session(agent_name="my-first-agent") as session:
+    # Create a span for an LLM call
+    with session.span("generate-greeting", span_type="llm_call") as span:
+        span.set_input({"prompt": "Say hello"})
+        span.set_model("gpt-4o", provider="openai")
+
+        # Simulate an LLM response
+        result = "Hello! How can I help you today?"
+
+        span.set_output(result)
+        span.set_tokens(input_tokens=12, output_tokens=9)
+        span.set_cost(cost_cents=1)
+
+    # Create a span for a tool call
+    with session.span("search-docs", span_type="tool_call") as span:
+        span.set_input({"query": "agentstack setup"})
+        span.set_output({"results": ["Getting Started guide"]})
+
+print(f"Session ID: {session.id}")
+print(f"Status: {session.status}")
+print(f"Total tokens: {session.total_tokens}")
+```
+
+Run it:
+
+```bash
+python quickstart.py
+```
+
+## View Data in the Dashboard
+
+Open [http://localhost:3000/dashboard/sessions](http://localhost:3000/dashboard/sessions) to see your session. Click on it to view the full trace timeline with:
+
+- Session metadata and status
+- Individual spans displayed on a Gantt-chart timeline
+- Token usage and cost per span
+- Input/output data for each span
+
+Navigate to [http://localhost:3000/dashboard/overview](http://localhost:3000/dashboard/overview) for aggregate metrics including session count, failure rate, total tokens, and cost.
+
+## Next Steps
+
+- [Python SDK Reference](/docs/python-sdk) -- Full SDK documentation with all methods and features
+- [TypeScript SDK Reference](/docs/typescript-sdk) -- Node.js SDK for TypeScript projects
+- [API Reference](/docs/api-reference) -- Complete REST API documentation

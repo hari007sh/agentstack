@@ -1,0 +1,275 @@
+---
+title: Route (Gateway)
+description: Route provides an OpenAI-compatible gateway proxy with model routing, provider failover, semantic caching, and load balancing.
+---
+
+# Route (Gateway)
+
+Route is AgentStack's gateway module. It provides an OpenAI-compatible proxy server (port 8090) that sits between your application and LLM providers. It handles model routing, provider failover, semantic caching, and request logging -- all with less than 5ms overhead.
+
+## Overview
+
+The gateway proxy accepts standard OpenAI API format and routes requests to any configured provider:
+
+- **OpenAI** -- GPT-4o, GPT-4, GPT-3.5
+- **Anthropic** -- Claude 3.5 Sonnet, Claude 3 Opus, Claude 3 Haiku
+- **Google** -- Gemini Pro, Gemini Ultra
+- **Together** -- Open-source models (Llama, Mistral, etc.)
+- **Groq** -- Fast inference for open-source models
+- **Mistral** -- Mistral Large, Medium, Small
+
+## How It Works
+
+### Request Pipeline
+
+```
+Client Request (OpenAI format)
+    |
+    v
+1. Authenticate (X-AgentStack-Org-ID header)
+    |
+    v
+2. Check semantic cache (Redis fast path, PostgreSQL slow path)
+    |-- Cache HIT --> Return cached response (X-AgentStack-Cache-Hit: true)
+    |
+    v (Cache MISS)
+3. Match routing rules (glob pattern on model name)
+    |
+    v
+4. Select provider via strategy (priority / round_robin / cost)
+    |
+    v
+5. Forward request to provider (streaming or non-streaming)
+    |
+    v
+6. Store response in cache (async)
+    |
+    v
+7. Log request via NATS (async)
+    |
+    v
+Return response (X-AgentStack-Provider / X-AgentStack-Model headers)
+```
+
+### Routing Rules
+
+Routing rules match the requested model name using glob patterns and direct the request to a specific provider and target model.
+
+| Field | Description |
+|-------|-------------|
+| `model_pattern` | Glob pattern to match against the requested model (e.g., `gpt-4*`, `claude-*`, `*`) |
+| `provider_id` | ID of the configured provider to route to |
+| `target_model` | The actual model name sent to the provider |
+| `strategy` | How to select among multiple matching routes |
+| `priority` | Priority when using the `priority` strategy (higher wins) |
+| `weight` | Weight when using the `cost` strategy (lower wins) |
+
+### Routing Strategies
+
+When multiple routes match a model request:
+
+| Strategy | Selection Logic |
+|----------|----------------|
+| `priority` (default) | Selects the route with the highest `priority` value |
+| `round_robin` | Cycles through matching routes sequentially |
+| `cost` | Selects the route with the lowest `weight` value |
+
+### Semantic Caching
+
+The gateway uses SHA-256 exact-match caching. The cache key is computed from a normalized representation of:
+
+- Organization ID
+- Model name
+- Messages array
+- Temperature
+- Tools
+
+Lookups use a two-tier strategy:
+
+1. **Redis fast path**: In-memory lookup with configurable TTL (default: 1 hour)
+2. **PostgreSQL slow path**: Durable fallback that handles Redis restarts
+
+Cache can be disabled per-request with the `X-AgentStack-Cache: false` header.
+
+### Fallback Chains
+
+Fallback chains define ordered lists of provider/model pairs. When the primary provider fails, the gateway automatically tries the next entry in the chain.
+
+```json
+{
+  "name": "GPT-4 fallback chain",
+  "model_pattern": "gpt-4*",
+  "chain": [
+    { "provider_id": "prov_openai", "model": "gpt-4o" },
+    { "provider_id": "prov_anthropic", "model": "claude-3-5-sonnet-20241022" },
+    { "provider_id": "prov_google", "model": "gemini-pro" }
+  ],
+  "enabled": true
+}
+```
+
+### Provider API Key Security
+
+Provider API keys are encrypted with AES-256-GCM before storage. The `ENCRYPTION_KEY` environment variable (32-byte hex string) is used for encryption and decryption at runtime. Keys are never stored in plaintext and never appear in API responses.
+
+## API Reference
+
+### Chat Completions (Gateway Proxy)
+
+```bash
+curl http://localhost:8090/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-AgentStack-Org-ID: org_abc123" \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [
+      {"role": "user", "content": "Hello, world!"}
+    ]
+  }'
+```
+
+The response follows the standard OpenAI chat completion format. Additional headers:
+
+| Header | Description |
+|--------|-------------|
+| `X-AgentStack-Provider` | The provider that handled the request |
+| `X-AgentStack-Model` | The actual model used |
+| `X-AgentStack-Cache-Hit` | `true` if served from cache, `false` otherwise |
+
+Streaming is supported -- set `"stream": true` in the request body.
+
+### Embeddings (Gateway Proxy)
+
+```bash
+curl http://localhost:8090/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -H "X-AgentStack-Org-ID: org_abc123" \
+  -d '{
+    "model": "text-embedding-3-small",
+    "input": "The quick brown fox"
+  }'
+```
+
+### Add a Provider
+
+```bash
+curl -X POST http://localhost:8080/v1/gateway/providers \
+  -H "Authorization: Bearer as_sk_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "openai",
+    "display_name": "OpenAI",
+    "api_key": "sk-your-openai-key",
+    "base_url": "https://api.openai.com/v1",
+    "is_enabled": true,
+    "config": {}
+  }'
+```
+
+Response (`201 Created`):
+
+```json
+{
+  "id": "prov_abc123",
+  "org_id": "org_xyz",
+  "name": "openai",
+  "display_name": "OpenAI",
+  "base_url": "https://api.openai.com/v1",
+  "is_enabled": true,
+  "config": {},
+  "created_at": "2025-01-15T10:00:00Z",
+  "updated_at": "2025-01-15T10:00:00Z"
+}
+```
+
+The `api_key` field is accepted on create/update but never returned in responses.
+
+### List Providers
+
+```
+GET /v1/gateway/providers
+Authorization: Bearer as_sk_your_key
+```
+
+### Create a Route
+
+```bash
+curl -X POST http://localhost:8080/v1/gateway/routes \
+  -H "Authorization: Bearer as_sk_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "GPT-4o via OpenAI",
+    "model_pattern": "gpt-4o*",
+    "strategy": "priority",
+    "provider_id": "prov_abc123",
+    "target_model": "gpt-4o",
+    "priority": 100,
+    "enabled": true
+  }'
+```
+
+| Field | Required | Default |
+|-------|----------|---------|
+| `name` | Yes | -- |
+| `provider_id` | Yes | -- |
+| `target_model` | Yes | -- |
+| `model_pattern` | No | `*` (matches all) |
+| `strategy` | No | `priority` |
+| `priority` | No | `0` |
+| `weight` | No | `1.0` |
+| `enabled` | No | `true` |
+
+### List Routes
+
+```
+GET /v1/gateway/routes
+Authorization: Bearer as_sk_your_key
+```
+
+### Create a Fallback Chain
+
+```bash
+curl -X POST http://localhost:8080/v1/gateway/fallbacks \
+  -H "Authorization: Bearer as_sk_your_key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "GPT-4 failover",
+    "model_pattern": "gpt-4*",
+    "chain": [
+      { "provider_id": "prov_openai", "model": "gpt-4o" },
+      { "provider_id": "prov_anthropic", "model": "claude-3-5-sonnet-20241022" }
+    ],
+    "enabled": true
+  }'
+```
+
+### List Fallback Chains
+
+```
+GET /v1/gateway/fallbacks
+Authorization: Bearer as_sk_your_key
+```
+
+### Cache Management
+
+Cache stats and purge endpoints are available at:
+
+```
+GET /v1/gateway/cache/stats
+DELETE /v1/gateway/cache
+```
+
+## Dashboard Guide
+
+### Route Overview (`/dashboard/route`)
+
+Displays:
+- **Metric cards**: Total requests, cache hit rate, average latency, active providers.
+- **Requests over time**: Area chart of gateway request volume.
+- **Provider distribution**: Pie chart showing traffic split across providers.
+- **Latency distribution**: Histogram of response times.
+- **Recent requests table**: Latest gateway requests with model, provider, latency, cache hit, and status.
+
+### Provider Management (`/dashboard/route/providers`)
+
+CRUD interface for managing providers. Add, edit, enable/disable, and delete providers. API keys are masked in the UI and can only be set (not read back).

@@ -1,0 +1,296 @@
+---
+title: Trace (Observability)
+description: Trace provides full observability for AI agents — session tracking, span-level tracing, failure pattern detection, and alerts.
+---
+
+# Trace (Observability)
+
+Trace is AgentStack's observability module. It captures every session, span, and event from your AI agents, stores them in ClickHouse for fast aggregation, and surfaces failure patterns and alert conditions.
+
+## Overview
+
+Trace gives you:
+
+- **Sessions**: Top-level execution units for an agent run, with status, duration, cost, and token counts.
+- **Spans**: Individual operations within a session (LLM calls, tool calls, retrievals, chains, agent steps).
+- **Events**: Arbitrary timestamped events attached to sessions or spans.
+- **Failure Patterns**: Pre-built and custom patterns that match against session data to detect recurring failures.
+- **Alerts**: Rules that trigger notifications when conditions are met (failure rate thresholds, latency spikes, etc.).
+
+## How It Works
+
+### Sessions and Spans Model
+
+A **session** represents a single agent execution from start to finish. Each session contains one or more **spans** that form a tree (spans can have a `parent_id`).
+
+```
+Session: "Customer Support Run #1847"
+├── Span: agent (root)
+│   ├── Span: llm_call (classify intent)
+│   ├── Span: tool_call (search_knowledge_base)
+│   ├── Span: llm_call (generate response)
+│   └── Span: tool_call (send_email)
+```
+
+**Session statuses**: `running`, `completed`, `failed`, `timeout`, `healed`
+
+**Span types**: `llm_call`, `tool_call`, `retrieval`, `chain`, `agent`, `custom`
+
+### Data Flow to ClickHouse
+
+1. SDKs send data to ingestion endpoints (`POST /v1/ingest/sessions`, `/spans`, `/events`, `/batch`).
+2. The API server publishes each item to a NATS subject (`trace.ingest.session`, `trace.ingest.span`, `trace.ingest.event`).
+3. The ingest writer worker subscribes to these subjects and batch-writes to ClickHouse.
+4. API responses return `202 Accepted` immediately — they are never blocked on ClickHouse writes.
+5. Query endpoints (`GET /v1/sessions/*`, `GET /v1/analytics/*`) read directly from ClickHouse.
+
+### Failure Patterns
+
+AgentStack ships with 50+ pre-built failure patterns (seeded from `seed/failure_patterns.json`). The pattern matcher worker periodically scans sessions and flags matches. Examples:
+
+- Infinite loop detected (same tool called 5+ times)
+- Token budget exceeded
+- Empty response from LLM
+- Tool call returned error
+
+### Alerts
+
+Alert rules define conditions that trigger notifications:
+
+- Failure rate exceeds a threshold over a time window
+- Average latency exceeds a threshold
+- Cost per session exceeds a limit
+
+When conditions are met, the alert evaluator worker triggers the configured action (email via SendGrid, webhook, etc.).
+
+## API Reference
+
+### Ingest Session
+
+```
+POST /v1/ingest/sessions
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+{
+  "id": "sess_abc123",
+  "agent_name": "customer-support",
+  "status": "completed",
+  "input": "How do I reset my password?",
+  "output": "Go to Settings > Security > Reset Password.",
+  "total_tokens": 1250,
+  "total_cost_cents": 3,
+  "total_spans": 4,
+  "duration_ms": 2340,
+  "tags": ["support", "password"],
+  "started_at": "2025-01-15T10:30:00Z",
+  "ended_at": "2025-01-15T10:30:02.340Z"
+}
+```
+
+Response (`202 Accepted`):
+
+```json
+{
+  "status": "accepted",
+  "session_id": "sess_abc123"
+}
+```
+
+**Validation**: Either `agent_name` or `agent_id` is required. If `id` is omitted, the server generates a UUID. If `status` is omitted, it defaults to `running`.
+
+### Ingest Spans
+
+```
+POST /v1/ingest/spans
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+[
+  {
+    "session_id": "sess_abc123",
+    "name": "classify_intent",
+    "span_type": "llm_call",
+    "status": "completed",
+    "model": "gpt-4o",
+    "provider": "openai",
+    "input": "How do I reset my password?",
+    "output": "intent: password_reset",
+    "input_tokens": 45,
+    "output_tokens": 8,
+    "duration_ms": 820,
+    "started_at": "2025-01-15T10:30:00Z",
+    "ended_at": "2025-01-15T10:30:00.820Z"
+  }
+]
+```
+
+Response (`202 Accepted`):
+
+```json
+{
+  "status": "accepted",
+  "count": 1
+}
+```
+
+**Validation**: `session_id` and `span_type` are required on every span. Valid span types: `llm_call`, `tool_call`, `retrieval`, `chain`, `agent`, `custom`.
+
+### Ingest Events
+
+```
+POST /v1/ingest/events
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+[
+  {
+    "session_id": "sess_abc123",
+    "span_id": "span_def456",
+    "type": "warning",
+    "name": "token_budget_warning",
+    "data": "{\"tokens_used\": 950, \"budget\": 1000}"
+  }
+]
+```
+
+### Batch Ingest
+
+```
+POST /v1/ingest/batch
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+{
+  "sessions": [ ... ],
+  "spans": [ ... ],
+  "events": [ ... ]
+}
+```
+
+Response (`202 Accepted`):
+
+```json
+{
+  "status": "accepted",
+  "sessions": 1,
+  "spans": 4,
+  "events": 2
+}
+```
+
+### List Sessions
+
+```
+GET /v1/sessions?agent_name=customer-support&status=failed&limit=20&offset=0
+Authorization: Bearer as_sk_your_key
+```
+
+Query parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `agent_name` | — | Filter by agent name |
+| `status` | — | Filter by status: `running`, `completed`, `failed`, `timeout`, `healed` |
+| `limit` | 50 | Number of sessions to return |
+| `offset` | 0 | Pagination offset |
+| `start_date` | — | Filter sessions started after this time (RFC3339) |
+| `end_date` | — | Filter sessions started before this time (RFC3339) |
+
+Response:
+
+```json
+{
+  "sessions": [ ... ],
+  "total": 847,
+  "limit": 20,
+  "offset": 0
+}
+```
+
+### Get Session Detail
+
+```
+GET /v1/sessions/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+Returns the full session with all associated data.
+
+### Get Session Spans
+
+```
+GET /v1/sessions/{id}/spans
+Authorization: Bearer as_sk_your_key
+```
+
+Returns all spans for a session, ordered for timeline replay.
+
+### Get Session Events
+
+```
+GET /v1/sessions/{id}/events
+Authorization: Bearer as_sk_your_key
+```
+
+### Analytics Overview
+
+```
+GET /v1/analytics/overview?start=2025-01-01T00:00:00Z&end=2025-01-31T23:59:59Z
+Authorization: Bearer as_sk_your_key
+```
+
+Returns aggregate metrics: total sessions, failure rate, average duration, total cost, reliability score.
+
+### Sessions Over Time
+
+```
+GET /v1/analytics/sessions-over-time?start=...&end=...&interval=3600
+Authorization: Bearer as_sk_your_key
+```
+
+Returns time-series data with the count of sessions per interval bucket.
+
+### Failure Rate Over Time
+
+```
+GET /v1/analytics/failure-rate?start=...&end=...&interval=3600
+Authorization: Bearer as_sk_your_key
+```
+
+Returns time-series data with the failure rate per interval bucket.
+
+## Dashboard Guide
+
+### Sessions Page (`/dashboard/sessions`)
+
+Lists all sessions with columns: agent name, status (color-coded dot), duration, token count, cost, and timestamp. Supports filtering by agent, status, and date range.
+
+### Session Detail (`/dashboard/sessions/{id}`)
+
+Shows the full session with:
+- Session metadata (status, duration, tokens, cost)
+- D3.js Gantt-chart timeline showing all spans as horizontal bars
+- Span detail panel (click any span to see input/output, model, tokens, latency)
+- Healing intervention markers (if Shield was active)
+- Events timeline
+
+### Analytics Page (`/dashboard/analytics`)
+
+Displays four metric cards (total sessions, failure rate, average latency, reliability score) with animated count-up numbers and sparklines. Below, two charts: sessions over time (area chart) and failure rate over time (line chart).
+
+### Patterns Page (`/dashboard/patterns`)
+
+Lists all failure patterns with match counts. Clicking a pattern shows the matched sessions.
+
+### Alerts Page (`/dashboard/alerts`)
+
+CRUD interface for alert rules. Shows active alerts, triggered history, and configuration for each rule (threshold, time window, notification channel).
