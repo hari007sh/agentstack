@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // PostgresStore provides CRUD access to dataset data in PostgreSQL.
@@ -84,7 +85,7 @@ func (s *PostgresStore) CreateDataset(ctx context.Context, d *Dataset) error {
 	          RETURNING created_at, updated_at`
 
 	return s.db.QueryRowContext(ctx, query,
-		d.ID, d.OrgID, d.Name, d.Description, d.Schema, d.ItemCount, d.Tags, d.Source,
+		d.ID, d.OrgID, d.Name, d.Description, d.Schema, d.ItemCount, pq.Array(d.Tags), d.Source,
 	).Scan(&d.CreatedAt, &d.UpdatedAt)
 }
 
@@ -96,7 +97,7 @@ func (s *PostgresStore) GetDataset(ctx context.Context, orgID, id string) (*Data
 	var d Dataset
 	err := s.db.QueryRowContext(ctx, query, orgID, id).Scan(
 		&d.ID, &d.OrgID, &d.Name, &d.Description, &d.Schema,
-		&d.ItemCount, &d.Tags, &d.Source, &d.CreatedAt, &d.UpdatedAt,
+		&d.ItemCount, pq.Array(&d.Tags), &d.Source, &d.CreatedAt, &d.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -137,7 +138,7 @@ func (s *PostgresStore) ListDatasets(ctx context.Context, orgID string, limit, o
 	for rows.Next() {
 		var d Dataset
 		if err := rows.Scan(&d.ID, &d.OrgID, &d.Name, &d.Description, &d.Schema,
-			&d.ItemCount, &d.Tags, &d.Source, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			&d.ItemCount, pq.Array(&d.Tags), &d.Source, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan dataset: %w", err)
 		}
 		if d.Tags == nil {
@@ -158,7 +159,7 @@ func (s *PostgresStore) UpdateDataset(ctx context.Context, d *Dataset) error {
 	          RETURNING updated_at`
 
 	return s.db.QueryRowContext(ctx, query,
-		d.Name, d.Description, d.Tags, d.Schema, d.OrgID, d.ID,
+		d.Name, d.Description, pq.Array(d.Tags), d.Schema, d.OrgID, d.ID,
 	).Scan(&d.UpdatedAt)
 }
 
