@@ -7,9 +7,9 @@ import {
   TrendingUp,
   Target,
   Gauge,
-  BarChart3,
 } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
+import { StackedAreaChart } from "@/components/charts";
 import {
   fadeIn,
   staggerContainer,
@@ -72,6 +72,31 @@ const mockSpenders: TopSpender[] = [
     sessions: 2934,
     total_cost_cents: 23472,
     avg_cost_per_session_cents: 8,
+  },
+];
+
+// Mock cost-over-time data by model (last 7 days, values in cents)
+const costLabels = ["Mar 14", "Mar 15", "Mar 16", "Mar 17", "Mar 18", "Mar 19", "Mar 20"];
+const costSeries = [
+  {
+    name: "GPT-4o",
+    color: "#10a37f",
+    data: [28400, 31200, 26800, 34100, 29500, 32800, 30200],
+  },
+  {
+    name: "Claude 3.5",
+    color: "#d4a574",
+    data: [12300, 14500, 11800, 15200, 13900, 16100, 14800],
+  },
+  {
+    name: "GPT-4o Mini",
+    color: "#6ee7b7",
+    data: [4200, 3800, 4500, 3600, 4100, 3900, 4300],
+  },
+  {
+    name: "Other",
+    color: "#8b5cf6",
+    data: [2100, 1800, 2400, 1900, 2200, 2000, 2300],
   },
 ];
 
@@ -155,18 +180,18 @@ export default function CostOverviewPage() {
         </motion.div>
       )}
 
-      {/* Chart Placeholder */}
+      {/* Cost Over Time Chart */}
       {loading ? (
         <SkeletonChart />
       ) : (
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-5">
           <h3 className="text-sm font-medium mb-4">Cost Over Time</h3>
-          <div className="h-48 flex items-center justify-center text-[var(--text-tertiary)] text-sm">
-            <div className="text-center">
-              <BarChart3 className="w-8 h-8 mx-auto mb-2 opacity-30" />
-              <p>Chart will be implemented with D3.js</p>
-            </div>
-          </div>
+          <StackedAreaChart
+            labels={costLabels}
+            series={costSeries}
+            height={210}
+            formatValue={(v) => `$${(v / 100).toFixed(0)}`}
+          />
         </div>
       )}
 

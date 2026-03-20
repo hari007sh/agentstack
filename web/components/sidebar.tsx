@@ -27,8 +27,9 @@ import {
   Bell,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { requestIdStore } from "@/lib/api";
 
 interface NavItem {
   label: string;
@@ -92,6 +93,12 @@ const navigation: NavSection[] = [
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [lastRequestId, setLastRequestId] = useState("");
+
+  useEffect(() => {
+    const unsubscribe = requestIdStore.subscribe(setLastRequestId);
+    return unsubscribe;
+  }, []);
 
   return (
     <>
@@ -212,7 +219,7 @@ export function Sidebar() {
         </nav>
 
         {/* Footer — fixed at bottom */}
-        <div className="flex-shrink-0 border-t border-[var(--border-subtle)] px-3 py-2.5">
+        <div className="flex-shrink-0 border-t border-[var(--border-subtle)] px-3 py-2.5 space-y-2">
           <div className="flex items-center gap-2.5">
             {!collapsed && (
               <>
@@ -227,6 +234,21 @@ export function Sidebar() {
             )}
             <ThemeToggle collapsed={collapsed} />
           </div>
+          {/* Last Request ID for debugging */}
+          {!collapsed && lastRequestId && (
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(lastRequestId).catch(() => {});
+              }}
+              title="Click to copy request ID"
+              className="w-full text-left px-1 py-1 rounded hover:bg-[var(--bg-hover)] transition-colors group"
+            >
+              <p className="text-[9px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">Last Request</p>
+              <p className="text-[10px] font-mono text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)] truncate transition-colors">
+                {lastRequestId}
+              </p>
+            </button>
+          )}
         </div>
       </aside>
     </>
