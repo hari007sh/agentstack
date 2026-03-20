@@ -609,6 +609,25 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 			orgID, keyHash, keyPrefix, userID,
 		)
 
+		// Seed default guardrails for new org
+		defaultGuards := []struct {
+			name, gtype, mode, applyTo, config string
+		}{
+			{"PII Detection", "pii", "block", "both", `{"detect":["email","phone","ssn","credit_card","ip_address"]}`},
+			{"Prompt Injection Guard", "injection", "block", "input", `{}`},
+			{"Toxicity Filter", "toxicity", "warn", "both", `{"categories":["profanity","threats","hate_speech","harassment"]}`},
+			{"Code Execution Guard", "code_exec", "block", "input", `{}`},
+			{"Length Guard", "length", "warn", "both", `{"max_chars":10000,"max_tokens":4000}`},
+			{"Hallucination Detection", "hallucination", "warn", "output", `{}`},
+		}
+		for _, g := range defaultGuards {
+			_, _ = tx.ExecContext(r.Context(),
+				`INSERT INTO guardrails (org_id, name, type, mode, apply_to, config, is_builtin, enabled)
+				 VALUES ($1, $2, $3, $4, $5, $6, true, true)`,
+				orgID, g.name, g.gtype, g.mode, g.applyTo, g.config,
+			)
+		}
+
 		if txErr = tx.Commit(); txErr != nil {
 			WriteError(w, http.StatusInternalServerError, "DB_ERROR", "failed to commit transaction")
 			return
