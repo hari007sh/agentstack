@@ -12,7 +12,18 @@ from datetime import datetime, timezone, timedelta
 import requests
 
 API_URL = "http://localhost:8080"
-API_KEY = "as_sk_test123"
+
+# Use JWT token if available (matches logged-in user's org), else fall back to API key
+import os
+_jwt_file = "/tmp/agentstack_jwt.txt"
+if os.path.exists(_jwt_file):
+    with open(_jwt_file) as f:
+        API_KEY = f.read().strip()
+    print(f"Using JWT token from {_jwt_file}")
+else:
+    API_KEY = os.environ.get("AGENTSTACK_API_KEY", "as_sk_test123")
+    print(f"Using API key: {API_KEY[:20]}...")
+
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
 AGENTS = [
