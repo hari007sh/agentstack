@@ -69,21 +69,31 @@ export interface Agent {
 
 export interface FailurePattern {
   id: string;
+  org_id: string;
   name: string;
   description: string;
   category: string;
+  detection_rules: Record<string, unknown>;
   severity: "low" | "medium" | "high" | "critical";
   is_builtin: boolean;
   enabled: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AlertRule {
   id: string;
+  org_id: string;
   name: string;
   description: string;
   condition_type: string;
+  condition_config: Record<string, unknown>;
+  channels: string[];
+  channel_config: Record<string, unknown>;
   enabled: boolean;
   last_triggered_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface TestSuite {
