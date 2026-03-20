@@ -93,9 +93,9 @@ func (s *Server) setupRoutes() {
 	healingSvc := shieldservice.NewHealingService(s.nats, shieldChStore, s.logger)
 	healingHandler := shieldhandler.NewHealingHandler(healingSvc, s.logger)
 
-	// API v1 routes — authenticated via API key
+	// API v1 routes — authenticated via JWT (dashboard) or API key (SDKs)
 	s.router.Route("/v1", func(r chi.Router) {
-		r.Use(middleware.APIKeyAuth(s.apiKeyStore))
+		r.Use(middleware.DualAuth(s.jwtManager, s.apiKeyStore))
 
 		// Rate limiting
 		if s.redis != nil {
