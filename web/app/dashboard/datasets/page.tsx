@@ -51,10 +51,11 @@ interface Dataset {
 }
 
 interface ListDatasetsResponse {
-  datasets: Dataset[];
-  total: number;
-  limit: number;
-  offset: number;
+  data: Dataset[];
+  meta: { page: number; per_page: number; total: number };
+  // Fallback shape from some endpoints
+  datasets?: Dataset[];
+  total?: number;
 }
 
 function formatDate(ts: string): string {
@@ -103,8 +104,8 @@ export default function DatasetsPage() {
     try {
       initAuth();
       const res = await api.get<ListDatasetsResponse>("/v1/datasets");
-      setDatasets(res.datasets || []);
-      setTotal(res.total || 0);
+      setDatasets(res.data || res.datasets || []);
+      setTotal(res.meta?.total ?? res.total ?? 0);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);

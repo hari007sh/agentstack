@@ -49,10 +49,10 @@ interface DatasetItem {
 }
 
 interface ListItemsResponse {
-  items: DatasetItem[];
-  total: number;
-  limit: number;
-  offset: number;
+  data: DatasetItem[];
+  meta: { page: number; per_page: number; total: number };
+  items?: DatasetItem[];
+  total?: number;
 }
 
 const formatColors: Record<string, string> = {
@@ -133,8 +133,8 @@ export default function DatasetDetailPage() {
       const res = await api.get<ListItemsResponse>(
         `/v1/datasets/${datasetId}/items?limit=${itemsPerPage}&offset=${offset}`
       );
-      setItems(res.items || []);
-      setItemsTotal(res.total || 0);
+      setItems(res.data || res.items || []);
+      setItemsTotal(res.meta?.total ?? res.total ?? 0);
     } catch (err) {
       if (err instanceof ApiError) {
         setItemsError(err.message);
