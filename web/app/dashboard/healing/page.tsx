@@ -21,109 +21,13 @@ import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
 import type { HealingEvent } from "@/lib/types";
 
-// ---------------------------------------------------------------------------
-// Mock data — used as fallback when the backend is unreachable
-// ---------------------------------------------------------------------------
-const mockMetrics = {
-  total_interventions: 342,
-  success_rate: 94.7,
-  saved_cost_cents: 128400,
-  active_shields: 5,
+// Default zero metrics for initial state and empty data
+const zeroMetrics = {
+  total_interventions: 0,
+  success_rate: 0,
+  saved_cost_cents: 0,
+  active_shields: 0,
 };
-
-const mockEvents: (HealingEvent & { time_ago: string })[] = [
-  {
-    id: "heal_1",
-    session_id: "ses_e5f6g7h8",
-    span_id: "span_102",
-    agent_name: "Code Review Agent",
-    healing_type: "loop_breaker",
-    trigger_reason: "Agent repeated same tool call 4 times in a row",
-    action_taken: "Broke loop, injected context summary, re-prompted",
-    success: true,
-    latency_ms: 45,
-    created_at: "2025-03-20T09:55:08Z",
-    time_ago: "5 min ago",
-  },
-  {
-    id: "heal_2",
-    session_id: "ses_c9d0e1f2",
-    span_id: "span_201",
-    agent_name: "Research Agent",
-    healing_type: "hallucination_fix",
-    trigger_reason: "Generated citation for non-existent paper (DOI mismatch)",
-    action_taken: "Flagged hallucination, re-ran with retrieval grounding",
-    success: true,
-    latency_ms: 120,
-    created_at: "2025-03-20T09:10:09Z",
-    time_ago: "50 min ago",
-  },
-  {
-    id: "heal_3",
-    session_id: "ses_abc123",
-    span_id: "span_301",
-    agent_name: "Data Pipeline Agent",
-    healing_type: "cost_circuit_breaker",
-    trigger_reason: "Session cost exceeded $0.50 threshold",
-    action_taken: "Downgraded from gpt-4o to gpt-4o-mini",
-    success: true,
-    latency_ms: 12,
-    created_at: "2025-03-20T08:45:00Z",
-    time_ago: "1h 15m ago",
-  },
-  {
-    id: "heal_4",
-    session_id: "ses_def456",
-    span_id: "span_401",
-    agent_name: "Support Agent",
-    healing_type: "timeout_handler",
-    trigger_reason: "LLM call exceeded 15s timeout",
-    action_taken: "Retried with shorter prompt and temperature 0",
-    success: true,
-    latency_ms: 8,
-    created_at: "2025-03-20T08:30:00Z",
-    time_ago: "1h 30m ago",
-  },
-  {
-    id: "heal_5",
-    session_id: "ses_ghi789",
-    span_id: "span_501",
-    agent_name: "Code Review Agent",
-    healing_type: "error_recovery",
-    trigger_reason: "Tool returned 500 error from GitHub API",
-    action_taken: "Retried 3 times with exponential backoff, succeeded on retry 2",
-    success: true,
-    latency_ms: 3200,
-    created_at: "2025-03-20T08:15:00Z",
-    time_ago: "1h 45m ago",
-  },
-  {
-    id: "heal_6",
-    session_id: "ses_jkl012",
-    span_id: "span_601",
-    agent_name: "Research Agent",
-    healing_type: "loop_breaker",
-    trigger_reason: "Agent entered infinite planning loop",
-    action_taken: "Attempted to break loop with summarized context",
-    success: false,
-    latency_ms: 200,
-    created_at: "2025-03-20T07:50:00Z",
-    time_ago: "2h 10m ago",
-  },
-  {
-    id: "heal_7",
-    session_id: "ses_mno345",
-    span_id: "span_701",
-    agent_name: "Data Pipeline Agent",
-    healing_type: "hallucination_fix",
-    trigger_reason: "Generated SQL with non-existent column names",
-    action_taken: "Re-retrieved schema, re-generated query with column validation",
-    success: true,
-    latency_ms: 340,
-    created_at: "2025-03-20T07:30:00Z",
-    time_ago: "2h 30m ago",
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Healing type visual config
@@ -216,16 +120,14 @@ interface HealingAnalyticsResponse {
 export default function HealingPage() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [usingMock, setUsingMock] = useState(false);
   const [events, setEvents] = useState<(HealingEvent & { time_ago: string })[]>([]);
-  const [metrics, setMetrics] = useState(mockMetrics);
+  const [metrics, setMetrics] = useState(zeroMetrics);
   const [selectedRange, setSelectedRange] = useState("24h");
 
   const fetchHealingData = useCallback(
     async (range: string) => {
       setLoading(true);
       setFetchError(null);
-      setUsingMock(false);
 
       // Set auth token from localStorage
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
@@ -250,7 +152,7 @@ export default function HealingPage() {
             analyticsData.success_rate > 1
               ? analyticsData.success_rate
               : analyticsData.success_rate * 100, // backend may return 0-1 or 0-100
-          saved_cost_cents: mockMetrics.saved_cost_cents, // not available from analytics endpoint
+          saved_cost_cents: 0, // not available from analytics endpoint yet
           active_shields: analyticsData.by_type?.length ?? 0,
         });
 
@@ -271,7 +173,6 @@ export default function HealingPage() {
         setEvents([]);
         setLoading(false);
       } catch (err) {
-        // Fallback to mock data when backend is unreachable
         const message =
           err instanceof ApiError
             ? err.message
@@ -279,13 +180,13 @@ export default function HealingPage() {
               ? err.message
               : "Failed to load healing data";
 
-        console.warn(
-          `[AgentStack] ${new Date().toISOString()} HealingPage: API call failed, falling back to mock data. Reason: ${message}`
+        console.error(
+          `[AgentStack] ${new Date().toISOString()} HealingPage: API call failed. Reason: ${message}`
         );
 
-        setMetrics(mockMetrics);
-        setEvents(mockEvents);
-        setUsingMock(true);
+        setFetchError(message);
+        setMetrics(zeroMetrics);
+        setEvents([]);
         setLoading(false);
       }
     },
@@ -296,7 +197,7 @@ export default function HealingPage() {
     fetchHealingData(selectedRange);
   }, [fetchHealingData, selectedRange]);
 
-  const isEmpty = !loading && !fetchError && events.length === 0;
+  const isEmpty = !loading && !fetchError && events.length === 0 && metrics.total_interventions === 0;
 
   return (
     <motion.div
@@ -314,12 +215,6 @@ export default function HealingPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {/* Mock data indicator */}
-          {usingMock && !loading && (
-            <span className="text-[10px] uppercase tracking-wider text-[var(--accent-amber)] font-medium px-2 py-1 rounded-md bg-[var(--accent-amber)]/10 border border-[var(--accent-amber)]/20">
-              Demo Data
-            </span>
-          )}
           {/* Time Range Selector */}
           <div className="flex items-center gap-1 p-1 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-subtle)]">
             {timeRanges.map((range) => (
@@ -409,14 +304,44 @@ export default function HealingPage() {
       {/* Empty State */}
       {isEmpty && (
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-16 text-center">
-          <div className="w-12 h-12 rounded-xl bg-[var(--healing-blue)]/10 flex items-center justify-center mx-auto mb-4">
-            <Shield className="w-6 h-6 text-[var(--healing-blue)]" />
+          <div className="w-14 h-14 rounded-xl bg-[var(--healing-blue)]/10 flex items-center justify-center mx-auto mb-5">
+            <Shield className="w-7 h-7 text-[var(--healing-blue)]" />
           </div>
-          <h3 className="text-sm font-medium mb-1">No healing events yet</h3>
-          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto">
-            Enable Shield self-healing in your agent configuration to see
-            interventions here.
+          <h3 className="text-base font-semibold mb-2 text-[var(--text-primary)]">
+            No healing interventions yet
+          </h3>
+          <p className="text-sm text-[var(--text-secondary)] max-w-md mx-auto mb-2">
+            Shield will automatically detect and fix agent failures like loops,
+            hallucinations, cost overruns, and timeouts.
           </p>
+          <p className="text-sm text-[var(--text-tertiary)] max-w-md mx-auto mb-6">
+            Enable Shield in your SDK to get started.
+          </p>
+
+          {/* Code snippet */}
+          <div className="max-w-sm mx-auto mb-6 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden text-left">
+            <div className="px-3 py-1.5 border-b border-[var(--border-subtle)] text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+              Quick Start
+            </div>
+            <pre className="px-4 py-3 text-xs leading-relaxed overflow-x-auto font-mono text-[var(--text-secondary)]">
+              <code>{`import agentstack
+
+agentstack.init(
+    api_key="your-key",
+    shield=True
+)`}</code>
+            </pre>
+          </div>
+
+          <a
+            href="https://docs.agentstack.dev/shield"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/10 transition-colors"
+          >
+            Learn about Shield
+            <span aria-hidden="true">&rarr;</span>
+          </a>
         </div>
       )}
 

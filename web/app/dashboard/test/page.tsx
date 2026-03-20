@@ -54,15 +54,12 @@ interface TestRun {
   created_at: string;
 }
 
-// ---------------------------------------------------------------------------
-// Mock / Fallback Data
-// ---------------------------------------------------------------------------
-
-const mockMetrics = {
-  total_suites: 12,
-  total_runs: 147,
-  pass_rate: 91.8,
-  avg_score: 87.3,
+// Default zero metrics for initial state and empty data
+const zeroMetrics = {
+  total_suites: 0,
+  total_runs: 0,
+  pass_rate: 0,
+  avg_score: 0,
 };
 
 interface DisplayTestRun {
@@ -77,69 +74,6 @@ interface DisplayTestRun {
   duration_ms: number;
   time_ago: string;
 }
-
-const mockRuns: DisplayTestRun[] = [
-  {
-    id: "run_001",
-    suite_id: "suite_1",
-    suite_name: "Research Agent Quality",
-    status: "completed",
-    passed: 18,
-    failed: 1,
-    errors: 0,
-    avg_score: 92.4,
-    duration_ms: 45200,
-    time_ago: "12 min ago",
-  },
-  {
-    id: "run_002",
-    suite_id: "suite_2",
-    suite_name: "Code Review Accuracy",
-    status: "running",
-    passed: 8,
-    failed: 0,
-    errors: 0,
-    avg_score: 0,
-    duration_ms: 0,
-    time_ago: "2 min ago",
-  },
-  {
-    id: "run_003",
-    suite_id: "suite_3",
-    suite_name: "Support Agent Responses",
-    status: "failed",
-    passed: 12,
-    failed: 5,
-    errors: 2,
-    avg_score: 71.2,
-    duration_ms: 38700,
-    time_ago: "1h ago",
-  },
-  {
-    id: "run_004",
-    suite_id: "suite_1",
-    suite_name: "Research Agent Quality",
-    status: "completed",
-    passed: 19,
-    failed: 0,
-    errors: 0,
-    avg_score: 95.1,
-    duration_ms: 42100,
-    time_ago: "3h ago",
-  },
-  {
-    id: "run_005",
-    suite_id: "suite_4",
-    suite_name: "Data Pipeline Validation",
-    status: "pending",
-    passed: 0,
-    failed: 0,
-    errors: 0,
-    avg_score: 0,
-    duration_ms: 0,
-    time_ago: "just now",
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -195,11 +129,10 @@ export default function TestOverviewPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [usingMock, setUsingMock] = useState(false);
 
   // Real data state
-  const [metrics, setMetrics] = useState(mockMetrics);
-  const [runs, setRuns] = useState<DisplayTestRun[]>(mockRuns);
+  const [metrics, setMetrics] = useState(zeroMetrics);
+  const [runs, setRuns] = useState<DisplayTestRun[]>([]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -265,13 +198,19 @@ export default function TestOverviewPage() {
       }));
 
       setRuns(displayRuns);
-      setUsingMock(false);
     } catch (err) {
-      console.warn("[TestPage] API fetch failed, using mock data:", err);
-      // Fall back to mock data
-      setMetrics(mockMetrics);
-      setRuns(mockRuns);
-      setUsingMock(true);
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Failed to load test data";
+
+      console.error(
+        `[AgentStack] ${new Date().toISOString()} TestPage: API call failed. Reason: ${message}`
+      );
+
+      setError(message);
+      setMetrics(zeroMetrics);
+      setRuns([]);
     } finally {
       setLoading(false);
     }
@@ -281,7 +220,7 @@ export default function TestOverviewPage() {
     fetchData();
   }, [fetchData]);
 
-  const isEmpty = !loading && runs.length === 0;
+  const isEmpty = !loading && !error && runs.length === 0;
 
   return (
     <motion.div
@@ -304,30 +243,23 @@ export default function TestOverviewPage() {
         </button>
       </div>
 
-      {/* Error Banner */}
+      {/* Error State */}
       {error && (
-        <div className="rounded-xl border border-[var(--accent-red)]/20 bg-[var(--accent-red)]/5 px-5 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-[var(--accent-red)]" />
-            <p className="text-sm text-[var(--accent-red)]">{error}</p>
+        <div className="rounded-xl border border-[var(--accent-red)]/20 bg-[var(--bg-elevated)] p-8 text-center">
+          <div className="w-12 h-12 rounded-xl bg-[var(--accent-red)]/10 flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-6 h-6 text-[var(--accent-red)]" />
           </div>
+          <h3 className="text-sm font-medium mb-1">Failed to load test data</h3>
+          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto mb-4">
+            {error}
+          </p>
           <button
             onClick={fetchData}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--accent-red)] hover:bg-[var(--accent-red)]/10 transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Retry
           </button>
-        </div>
-      )}
-
-      {/* Mock Data Indicator */}
-      {usingMock && !loading && (
-        <div className="rounded-lg border border-[var(--accent-amber)]/20 bg-[var(--accent-amber)]/5 px-4 py-2 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-[var(--accent-amber)]" />
-          <p className="text-xs text-[var(--accent-amber)]">
-            Showing sample data. Connect the backend to see real metrics.
-          </p>
         </div>
       )}
 
@@ -379,18 +311,39 @@ export default function TestOverviewPage() {
       {/* Empty State */}
       {isEmpty && (
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-16 text-center">
-          <div className="w-12 h-12 rounded-xl bg-[var(--accent-blue)]/10 flex items-center justify-center mx-auto mb-4">
-            <FlaskConical className="w-6 h-6 text-[var(--accent-blue)]" />
+          <div className="w-14 h-14 rounded-xl bg-[var(--accent-blue)]/10 flex items-center justify-center mx-auto mb-5">
+            <FlaskConical className="w-7 h-7 text-[var(--accent-blue)]" />
           </div>
-          <h3 className="text-sm font-medium mb-1">No test runs yet</h3>
-          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto">
-            Create a test suite and run your first evaluation to see results here.
+          <h3 className="text-base font-semibold mb-2 text-[var(--text-primary)]">
+            No test suites yet
+          </h3>
+          <p className="text-sm text-[var(--text-secondary)] max-w-md mx-auto mb-6">
+            Create test suites with evaluators to automatically measure your
+            agent&apos;s quality, accuracy, and reliability.
           </p>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={() => router.push("/dashboard/test/suites/new")}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-[var(--accent-blue)] text-white hover:opacity-90 transition-opacity active:scale-[0.98]"
+            >
+              <Plus className="w-4 h-4" />
+              New Test Suite
+            </button>
+            <a
+              href="https://docs.agentstack.dev/test/evaluators"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-[var(--text-secondary)] border border-[var(--border-default)] bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+            >
+              View Evaluators
+              <span aria-hidden="true">&rarr;</span>
+            </a>
+          </div>
         </div>
       )}
 
       {/* Table */}
-      {!loading && runs.length > 0 && (
+      {!loading && !error && runs.length > 0 && (
         <motion.div
           variants={staggerContainer}
           initial="hidden"
