@@ -1,8 +1,8 @@
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
 export enum SpanType {
-  LLM = 'llm',
-  TOOL = 'tool',
+  LLM = 'llm_call',
+  TOOL = 'tool_call',
   RETRIEVAL = 'retrieval',
   CHAIN = 'chain',
   AGENT = 'agent',

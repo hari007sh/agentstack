@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"sync"
@@ -108,7 +109,7 @@ func (al *AsyncLogger) flush(batch []*store.GatewayRequest) {
 	// Also write directly to PostgreSQL as a fallback
 	if al.dbStore != nil {
 		for _, req := range batch {
-			if err := al.dbStore.InsertGatewayRequest(nil, req); err != nil {
+			if err := al.dbStore.InsertGatewayRequest(context.Background(), req); err != nil {
 				al.logger.Error("insert gateway request", "error", err)
 			}
 		}

@@ -9,6 +9,8 @@ import json
 import logging
 import threading
 import time
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
@@ -137,11 +139,169 @@ class AgentStackClient:
         """
         Send a batch of events to the ingest endpoint.
 
+        Classifies SDK events into sessions, spans, and generic events,
+        converts them to the backend's expected format, and sends them
+        to the /v1/ingest/batch endpoint.
+
         Args:
-            events: List of event dicts.
+            events: List of event dicts from the SDK.
         """
+        sessions: List[Dict[str, Any]] = []
+        spans: List[Dict[str, Any]] = []
+        generic_events: List[Dict[str, Any]] = []
+
+        # Track session data across start/end events for merging
+        session_map: Dict[str, Dict[str, Any]] = {}
+
+        for event in events:
+            event_type = event.get("type", "")
+
+            if event_type == "session_start":
+                sid = event.get("session_id", "")
+                session_map[sid] = self._format_session_start(event)
+
+            elif event_type == "session_end":
+                sid = event.get("session_id", "")
+                if sid in session_map:
+                    # Merge end data into existing session
+                    self._merge_session_end(session_map[sid], event)
+                else:
+                    # No matching start — create a standalone session from end data
+                    session_map[sid] = self._format_session_end_only(event)
+
+            elif event_type.startswith("span."):
+                # Span events from session.add_event()
+                span_data = event.get("data", {})
+                spans.append(self._format_span(span_data))
+
+            else:
+                # Generic events
+                generic_events.append(self._format_event(event))
+
+        # Collect all sessions
+        sessions = list(session_map.values())
+
+        total_items = len(sessions) + len(spans) + len(generic_events)
+        if total_items == 0:
+            return
+
+        payload: Dict[str, Any] = {}
+        if sessions:
+            payload["sessions"] = sessions
+        if spans:
+            payload["spans"] = spans
+        if generic_events:
+            payload["events"] = generic_events
+
         url = f"{self._endpoint}/v1/ingest/batch"
-        self._request_with_retry("POST", url, json_data={"events": events})
+        self._request_with_retry("POST", url, json_data=payload)
+
+    @staticmethod
+    def _ts_to_rfc3339(ts: Optional[float]) -> str:
+        """Convert a Unix timestamp (float) to RFC3339Nano string."""
+        if ts is None or ts == 0:
+            return ""
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond:06d}Z"
+
+    @staticmethod
+    def _to_json_string(value: Any) -> str:
+        """Convert a value to a JSON string. Returns '{}' for None."""
+        if value is None:
+            return "{}"
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, default=str)
+        except (TypeError, ValueError):
+            return "{}"
+
+    def _format_session_start(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Format a session_start SDK event to backend SessionIngestRequest."""
+        tags = event.get("tags", {})
+        # Backend expects tags as a list of strings, not a dict
+        if isinstance(tags, dict):
+            tag_list = [f"{k}:{v}" for k, v in tags.items()] if tags else []
+        elif isinstance(tags, list):
+            tag_list = tags
+        else:
+            tag_list = []
+
+        return {
+            "id": event.get("session_id", ""),
+            "agent_name": event.get("agent_name", "default"),
+            "status": "running",
+            "metadata": self._to_json_string(event.get("metadata")),
+            "tags": tag_list,
+            "started_at": self._ts_to_rfc3339(event.get("timestamp")),
+        }
+
+    def _merge_session_end(self, session: Dict[str, Any], event: Dict[str, Any]) -> None:
+        """Merge session_end data into an existing session dict."""
+        session["status"] = event.get("status", "completed")
+        session["error"] = event.get("error", "") or ""
+        session["duration_ms"] = int(event.get("duration_ms", 0) or 0)
+        session["total_tokens"] = int(event.get("total_tokens", 0) or 0)
+        session["total_cost_cents"] = int(event.get("total_cost_cents", 0) or 0)
+        session["total_spans"] = int(event.get("span_count", 0) or 0)
+        session["ended_at"] = self._ts_to_rfc3339(event.get("timestamp"))
+
+    def _format_session_end_only(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Format a standalone session_end event (no matching start)."""
+        return {
+            "id": event.get("session_id", ""),
+            "agent_name": event.get("agent_name", "default"),
+            "status": event.get("status", "completed"),
+            "error": event.get("error", "") or "",
+            "metadata": "{}",
+            "tags": [],
+            "duration_ms": int(event.get("duration_ms", 0) or 0),
+            "total_tokens": int(event.get("total_tokens", 0) or 0),
+            "total_cost_cents": int(event.get("total_cost_cents", 0) or 0),
+            "total_spans": int(event.get("span_count", 0) or 0),
+            "ended_at": self._ts_to_rfc3339(event.get("timestamp")),
+        }
+
+    def _format_span(self, span_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Format a span dict from the SDK to backend SpanIngestRequest."""
+        tokens = span_data.get("tokens", {})
+        input_tokens = int(tokens.get("input", 0)) if isinstance(tokens, dict) else 0
+        output_tokens = int(tokens.get("output", 0)) if isinstance(tokens, dict) else 0
+        total_tokens = input_tokens + output_tokens
+
+        return {
+            "id": span_data.get("span_id", str(uuid.uuid4())),
+            "session_id": span_data.get("session_id", ""),
+            "parent_id": span_data.get("parent_span_id", ""),
+            "name": span_data.get("name", ""),
+            "span_type": span_data.get("span_type", "custom"),
+            "status": span_data.get("status", "completed"),
+            "input": self._to_json_string(span_data.get("input")),
+            "output": self._to_json_string(span_data.get("output")),
+            "error": span_data.get("error", "") or "",
+            "model": span_data.get("model", ""),
+            "provider": span_data.get("provider", ""),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "cost_cents": int(span_data.get("cost_cents", 0) or 0),
+            "duration_ms": int(span_data.get("duration_ms", 0) or 0),
+            "metadata": self._to_json_string(span_data.get("metadata")),
+            "started_at": self._ts_to_rfc3339(span_data.get("start_time")),
+            "ended_at": self._ts_to_rfc3339(span_data.get("end_time")),
+        }
+
+    def _format_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Format a generic SDK event to backend EventIngestRequest."""
+        return {
+            "id": str(uuid.uuid4()),
+            "session_id": event.get("session_id", ""),
+            "span_id": event.get("span_id", ""),
+            "type": event.get("type", ""),
+            "name": event.get("type", ""),
+            "data": self._to_json_string(event.get("data")),
+            "created_at": self._ts_to_rfc3339(event.get("timestamp")),
+        }
 
     def _request_with_retry(
         self,

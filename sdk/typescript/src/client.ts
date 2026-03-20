@@ -1,10 +1,74 @@
 import { Event, HealingEvent } from './types';
 
-// ─── Payload Types ──────────────────────────────────────────────────────────
+// ─── Backend Payload Types ─────────────────────────────────────────────────
+// These match the Go backend's service.BatchIngestRequest exactly.
+
+interface SessionPayload {
+  id: string;
+  agent_name: string;
+  agent_id?: string;
+  status: string;
+  input?: string;
+  output?: string;
+  error?: string;
+  metadata?: string;
+  total_tokens?: number;
+  total_cost_cents?: number;
+  total_spans?: number;
+  duration_ms?: number;
+  has_healing?: number;
+  tags?: string[];
+  started_at: string;
+  ended_at?: string;
+}
+
+interface SpanPayload {
+  id: string;
+  session_id: string;
+  parent_id?: string;
+  name: string;
+  span_type: string;
+  status: string;
+  input?: string;
+  output?: string;
+  error?: string;
+  model?: string;
+  provider?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  cost_cents?: number;
+  duration_ms?: number;
+  metadata?: string;
+  started_at: string;
+  ended_at?: string;
+}
+
+interface EventPayload {
+  id: string;
+  session_id: string;
+  span_id?: string;
+  type: string;
+  name?: string;
+  data?: string;
+  created_at: string;
+}
 
 interface BatchPayload {
-  events: Event[];
-  healingEvents: HealingEvent[];
+  sessions: SessionPayload[];
+  spans: SpanPayload[];
+  events: EventPayload[];
+}
+
+interface HealingPayload {
+  id: string;
+  session_id: string;
+  span_id?: string;
+  type: string;
+  trigger: string;
+  action: string;
+  description: string;
+  resolved: boolean;
   timestamp: string;
 }
 
@@ -22,8 +86,12 @@ interface ClientConfig {
 
 export class AgentStackClient {
   private config: ClientConfig;
-  private eventBuffer: Event[] = [];
-  private healingBuffer: HealingEvent[] = [];
+  private sessionBuffer: SessionPayload[] = [];
+  private spanBuffer: SpanPayload[] = [];
+  private eventBuffer: EventPayload[] = [];
+  private healingBuffer: HealingPayload[] = [];
+  // Legacy event buffer for backward compatibility with internal SDK events
+  private legacyEventBuffer: Event[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private isFlushing = false;
 
@@ -42,43 +110,109 @@ export class AgentStackClient {
 
   // ── Public API ──────────────────────────────────────────────────────────
 
-  addEvent(event: Event): void {
-    this.eventBuffer.push(event);
-    if (this.eventBuffer.length >= this.config.batchSize) {
-      void this.flush();
-    }
+  /**
+   * Add a session payload for ingestion.
+   */
+  addSession(session: SessionPayload): void {
+    this.sessionBuffer.push(session);
+    this.maybeFlush();
   }
 
+  /**
+   * Add a span payload for ingestion.
+   */
+  addSpan(span: SpanPayload): void {
+    this.spanBuffer.push(span);
+    this.maybeFlush();
+  }
+
+  /**
+   * Add an event payload for ingestion.
+   */
+  addEventPayload(event: EventPayload): void {
+    this.eventBuffer.push(event);
+    this.maybeFlush();
+  }
+
+  /**
+   * Add an internal Event (legacy format used by session/span lifecycle).
+   * These are translated to EventPayload and buffered for batch ingestion.
+   */
+  addEvent(event: Event): void {
+    this.legacyEventBuffer.push(event);
+
+    // Also buffer as a proper EventPayload for the backend
+    const payload: EventPayload = {
+      id: event.id,
+      session_id: event.sessionId,
+      span_id: event.spanId,
+      type: event.type,
+      name: event.type,
+      data: typeof event.data === 'string' ? event.data : JSON.stringify(event.data),
+      created_at: event.timestamp,
+    };
+    this.eventBuffer.push(payload);
+    this.maybeFlush();
+  }
+
+  /**
+   * Add a healing event for ingestion.
+   */
   addHealingEvent(event: HealingEvent): void {
-    this.healingBuffer.push(event);
-    if (this.healingBuffer.length >= this.config.batchSize) {
-      void this.flush();
-    }
+    const payload: HealingPayload = {
+      id: event.id,
+      session_id: event.sessionId,
+      span_id: event.spanId,
+      type: event.type,
+      trigger: event.trigger,
+      action: event.intervention.action,
+      description: event.intervention.description,
+      resolved: event.resolved,
+      timestamp: event.timestamp,
+    };
+    this.healingBuffer.push(payload);
+    this.maybeFlush();
   }
 
   async flush(): Promise<void> {
     if (this.isFlushing) return;
-    if (this.eventBuffer.length === 0 && this.healingBuffer.length === 0) return;
+
+    const hasBatchData = this.sessionBuffer.length > 0 || this.spanBuffer.length > 0 || this.eventBuffer.length > 0;
+    const hasHealingData = this.healingBuffer.length > 0;
+
+    if (!hasBatchData && !hasHealingData) return;
 
     this.isFlushing = true;
 
+    // Drain buffers
+    const sessions = this.sessionBuffer.splice(0);
+    const spans = this.spanBuffer.splice(0);
     const events = this.eventBuffer.splice(0);
     const healingEvents = this.healingBuffer.splice(0);
-
-    const payload: BatchPayload = {
-      events,
-      healingEvents,
-      timestamp: new Date().toISOString(),
-    };
+    this.legacyEventBuffer.splice(0);
 
     try {
-      await this.sendWithRetry(payload);
-      this.log(`Flushed ${events.length} events, ${healingEvents.length} healing events`);
+      // Send batch of sessions/spans/events
+      if (sessions.length > 0 || spans.length > 0 || events.length > 0) {
+        const batchPayload: BatchPayload = { sessions, spans, events };
+        await this.sendBatchWithRetry(batchPayload);
+        this.log(`Flushed batch: ${sessions.length} sessions, ${spans.length} spans, ${events.length} events`);
+      }
+
+      // Send healing events
+      if (healingEvents.length > 0) {
+        for (const he of healingEvents) {
+          await this.sendHealingWithRetry(he);
+        }
+        this.log(`Flushed ${healingEvents.length} healing events`);
+      }
     } catch (err) {
-      // Put events back in the buffer on failure
+      // Put data back in the buffers on failure
+      this.sessionBuffer.unshift(...sessions);
+      this.spanBuffer.unshift(...spans);
       this.eventBuffer.unshift(...events);
       this.healingBuffer.unshift(...healingEvents);
-      this.log(`Failed to flush events: ${err}`);
+      this.log(`Failed to flush: ${err}`);
     } finally {
       this.isFlushing = false;
     }
@@ -89,34 +223,53 @@ export class AgentStackClient {
     await this.flush();
   }
 
-  // ── Internal ────────────────────────────────────────────────────────────
+  // ── Internal: Batch ────────────────────────────────────────────────────
 
-  private async sendWithRetry(payload: BatchPayload): Promise<void> {
+  private async sendBatchWithRetry(payload: BatchPayload): Promise<void> {
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt < this.config.maxRetries; attempt++) {
       try {
-        await this.send(payload);
+        await this.sendJSON(`${this.config.endpoint}/v1/ingest/batch`, payload);
         return;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
-        const backoffMs = Math.min(1000 * Math.pow(2, attempt), 10000);
-        this.log(`Retry ${attempt + 1}/${this.config.maxRetries} in ${backoffMs}ms`);
-        await this.sleep(backoffMs);
+        if (attempt < this.config.maxRetries - 1) {
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt), 10000);
+          this.log(`Retry batch ${attempt + 1}/${this.config.maxRetries} in ${backoffMs}ms`);
+          await this.sleep(backoffMs);
+        }
       }
     }
 
-    throw lastError ?? new Error('Send failed after retries');
+    throw lastError ?? new Error('Batch send failed after retries');
   }
 
-  private async send(payload: BatchPayload): Promise<void> {
-    const url = `${this.config.endpoint}/v1/ingest`;
+  private async sendHealingWithRetry(payload: HealingPayload): Promise<void> {
+    let lastError: Error | undefined;
 
-    // Use dynamic import for fetch in Node.js < 18, otherwise globalThis.fetch
+    for (let attempt = 0; attempt < this.config.maxRetries; attempt++) {
+      try {
+        await this.sendJSON(`${this.config.endpoint}/v1/ingest/healing`, payload);
+        return;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (attempt < this.config.maxRetries - 1) {
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt), 10000);
+          this.log(`Retry healing ${attempt + 1}/${this.config.maxRetries} in ${backoffMs}ms`);
+          await this.sleep(backoffMs);
+        }
+      }
+    }
+
+    throw lastError ?? new Error('Healing send failed after retries');
+  }
+
+  private async sendJSON(url: string, payload: unknown): Promise<void> {
     const fetchFn = typeof globalThis.fetch === 'function' ? globalThis.fetch : undefined;
 
     if (!fetchFn) {
-      this.log('No fetch implementation available — events buffered locally');
+      this.log('No fetch implementation available — data buffered locally');
       return;
     }
 
@@ -131,7 +284,18 @@ export class AgentStackClient {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const body = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status}: ${response.statusText} — ${body}`);
+    }
+  }
+
+  // ── Internal: Timers ────────────────────────────────────────────────────
+
+  private maybeFlush(): void {
+    const totalPending =
+      this.sessionBuffer.length + this.spanBuffer.length + this.eventBuffer.length + this.healingBuffer.length;
+    if (totalPending >= this.config.batchSize) {
+      void this.flush();
     }
   }
 
@@ -173,6 +337,14 @@ export class AgentStackClient {
 
   get pendingHealingEventCount(): number {
     return this.healingBuffer.length;
+  }
+
+  get pendingSessionCount(): number {
+    return this.sessionBuffer.length;
+  }
+
+  get pendingSpanCount(): number {
+    return this.spanBuffer.length;
   }
 
   get endpoint(): string {
