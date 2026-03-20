@@ -97,7 +97,7 @@ export default function DatasetDetailPage() {
 
   const initAuth = useCallback(() => {
     if (typeof window !== "undefined") {
-      const token = localStorage.getItem("auth_token");
+      const token = localStorage.getItem("token");
       if (token) {
         api.setToken(token);
       }
@@ -219,7 +219,7 @@ export default function DatasetDetailPage() {
     setImportingFile(true);
     try {
       initAuth();
-      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
       const formData = new FormData();
       formData.append("file", file);
 
@@ -261,7 +261,7 @@ export default function DatasetDetailPage() {
   const handleExport = async () => {
     try {
       initAuth();
-      const token = typeof window !== "undefined" ? localStorage.getItem("auth_token") : null;
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
 
       const headers: Record<string, string> = {};
       if (token) {
