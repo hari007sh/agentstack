@@ -90,7 +90,7 @@ export default function DatasetsPage() {
 
   const initAuth = useCallback(() => {
     if (typeof window !== "undefined") {
-      const token = localStorage.getItem("auth_token");
+      const token = localStorage.getItem("token");
       if (token) {
         api.setToken(token);
       }
