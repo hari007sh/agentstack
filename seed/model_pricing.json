@@ -1,0 +1,164 @@
+[
+  {
+    "provider": "openai",
+    "model": "gpt-4o",
+    "input_cost_per_1m": 250,
+    "output_cost_per_1m": 1000
+  },
+  {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "input_cost_per_1m": 15,
+    "output_cost_per_1m": 60
+  },
+  {
+    "provider": "openai",
+    "model": "gpt-4-turbo",
+    "input_cost_per_1m": 1000,
+    "output_cost_per_1m": 3000
+  },
+  {
+    "provider": "openai",
+    "model": "gpt-3.5-turbo",
+    "input_cost_per_1m": 50,
+    "output_cost_per_1m": 150
+  },
+  {
+    "provider": "openai",
+    "model": "o1",
+    "input_cost_per_1m": 1500,
+    "output_cost_per_1m": 6000
+  },
+  {
+    "provider": "openai",
+    "model": "o1-mini",
+    "input_cost_per_1m": 300,
+    "output_cost_per_1m": 1200
+  },
+  {
+    "provider": "anthropic",
+    "model": "claude-3-opus",
+    "input_cost_per_1m": 1500,
+    "output_cost_per_1m": 7500
+  },
+  {
+    "provider": "anthropic",
+    "model": "claude-3-sonnet",
+    "input_cost_per_1m": 300,
+    "output_cost_per_1m": 1500
+  },
+  {
+    "provider": "anthropic",
+    "model": "claude-3-haiku",
+    "input_cost_per_1m": 25,
+    "output_cost_per_1m": 125
+  },
+  {
+    "provider": "anthropic",
+    "model": "claude-3.5-sonnet",
+    "input_cost_per_1m": 300,
+    "output_cost_per_1m": 1500
+  },
+  {
+    "provider": "anthropic",
+    "model": "claude-3.5-haiku",
+    "input_cost_per_1m": 80,
+    "output_cost_per_1m": 400
+  },
+  {
+    "provider": "google",
+    "model": "gemini-pro",
+    "input_cost_per_1m": 50,
+    "output_cost_per_1m": 150
+  },
+  {
+    "provider": "google",
+    "model": "gemini-1.5-pro",
+    "input_cost_per_1m": 125,
+    "output_cost_per_1m": 500
+  },
+  {
+    "provider": "google",
+    "model": "gemini-1.5-flash",
+    "input_cost_per_1m": 8,
+    "output_cost_per_1m": 30
+  },
+  {
+    "provider": "google",
+    "model": "gemini-2.0-flash",
+    "input_cost_per_1m": 10,
+    "output_cost_per_1m": 40
+  },
+  {
+    "provider": "together",
+    "model": "llama-3-70b",
+    "input_cost_per_1m": 90,
+    "output_cost_per_1m": 90
+  },
+  {
+    "provider": "together",
+    "model": "llama-3-8b",
+    "input_cost_per_1m": 20,
+    "output_cost_per_1m": 20
+  },
+  {
+    "provider": "together",
+    "model": "mixtral-8x7b",
+    "input_cost_per_1m": 60,
+    "output_cost_per_1m": 60
+  },
+  {
+    "provider": "together",
+    "model": "llama-3.1-405b",
+    "input_cost_per_1m": 350,
+    "output_cost_per_1m": 350
+  },
+  {
+    "provider": "groq",
+    "model": "llama-3-70b",
+    "input_cost_per_1m": 59,
+    "output_cost_per_1m": 79
+  },
+  {
+    "provider": "groq",
+    "model": "llama-3-8b",
+    "input_cost_per_1m": 5,
+    "output_cost_per_1m": 8
+  },
+  {
+    "provider": "groq",
+    "model": "mixtral-8x7b",
+    "input_cost_per_1m": 24,
+    "output_cost_per_1m": 24
+  },
+  {
+    "provider": "groq",
+    "model": "gemma-7b",
+    "input_cost_per_1m": 7,
+    "output_cost_per_1m": 7
+  },
+  {
+    "provider": "mistral",
+    "model": "mistral-large",
+    "input_cost_per_1m": 400,
+    "output_cost_per_1m": 1200
+  },
+  {
+    "provider": "mistral",
+    "model": "mistral-medium",
+    "input_cost_per_1m": 270,
+    "output_cost_per_1m": 810
+  },
+  {
+    "provider": "mistral",
+    "model": "mistral-small",
+    "input_cost_per_1m": 100,
+    "output_cost_per_1m": 300
+  },
+  {
+    "provider": "mistral",
+    "model": "mixtral-8x22b",
+    "input_cost_per_1m": 200,
+    "output_cost_per_1m": 600
+  }
+]

@@ -1,0 +1,402 @@
+[
+  {
+    "name": "Infinite Loop - Repeated Tool Calls",
+    "description": "Agent calls the same tool repeatedly without making progress, indicating an infinite loop.",
+    "category": "loop",
+    "severity": "critical",
+    "detection_rules": {"min_spans": 50, "error_contains": ""},
+    "is_builtin": true
+  },
+  {
+    "name": "Circular Reasoning Loop",
+    "description": "Agent enters a circular reasoning pattern, revisiting the same conclusions without new information.",
+    "category": "loop",
+    "severity": "high",
+    "detection_rules": {"min_spans": 30, "has_error": false},
+    "is_builtin": true
+  },
+  {
+    "name": "Retry Storm",
+    "description": "Agent retries the same failing operation excessively without backoff.",
+    "category": "loop",
+    "severity": "high",
+    "detection_rules": {"min_spans": 40, "has_error": true},
+    "is_builtin": true
+  },
+  {
+    "name": "Self-Referential Loop",
+    "description": "Agent references its own output as input, creating a feedback loop.",
+    "category": "loop",
+    "severity": "high",
+    "detection_rules": {"min_spans": 25},
+    "is_builtin": true
+  },
+  {
+    "name": "Oscillating Decisions",
+    "description": "Agent alternates between two conflicting actions repeatedly.",
+    "category": "loop",
+    "severity": "medium",
+    "detection_rules": {"min_spans": 20},
+    "is_builtin": true
+  },
+  {
+    "name": "Runaway Chain",
+    "description": "Chain of thought grows unbounded without reaching a conclusion.",
+    "category": "loop",
+    "severity": "medium",
+    "detection_rules": {"min_spans": 60},
+    "is_builtin": true
+  },
+  {
+    "name": "Stuck in Planning",
+    "description": "Agent keeps generating plans but never executes any action.",
+    "category": "loop",
+    "severity": "medium",
+    "detection_rules": {"min_spans": 15, "max_spans": 100},
+    "is_builtin": true
+  },
+  {
+    "name": "Recursive Decomposition Loop",
+    "description": "Agent recursively decomposes tasks into subtasks without ever completing any.",
+    "category": "loop",
+    "severity": "high",
+    "detection_rules": {"min_spans": 35},
+    "is_builtin": true
+  },
+  {
+    "name": "Confirmation Bias Loop",
+    "description": "Agent keeps seeking confirmatory evidence in a loop, ignoring disconfirming data.",
+    "category": "loop",
+    "severity": "medium",
+    "detection_rules": {"min_spans": 20},
+    "is_builtin": true
+  },
+  {
+    "name": "Empty Response Loop",
+    "description": "Agent generates empty or near-empty responses in a loop.",
+    "category": "loop",
+    "severity": "high",
+    "detection_rules": {"min_spans": 10, "has_error": true},
+    "is_builtin": true
+  },
+  {
+    "name": "Hallucinated Tool Call",
+    "description": "Agent attempts to call a tool or function that does not exist.",
+    "category": "hallucination",
+    "severity": "high",
+    "detection_rules": {"has_error": true, "error_contains": "tool not found"},
+    "is_builtin": true
+  },
+  {
+    "name": "Invalid API Endpoint",
+    "description": "Agent constructs API calls to endpoints that do not exist.",
+    "category": "hallucination",
+    "severity": "high",
+    "detection_rules": {"has_error": true, "error_contains": "invalid function"},
+    "is_builtin": true
+  },
+  {
+    "name": "Made-Up Reference",
+    "description": "Agent cites non-existent sources, papers, or documentation.",
+    "category": "hallucination",
+    "severity": "medium",
+    "detection_rules": {"has_error": true, "error_contains": "does not exist"},
+    "is_builtin": true
+  },
+  {
+    "name": "Fabricated Data",
+    "description": "Agent generates statistical data or metrics that have no basis in the provided context.",
+    "category": "hallucination",
+    "severity": "high",
+    "detection_rules": {"has_error": true, "error_contains": "hallucin"},
+    "is_builtin": true
+  },
+  {
+    "name": "Phantom Parameter",
+    "description": "Agent passes parameters to a tool that the tool does not accept.",
+    "category": "hallucination",
+    "severity": "medium",
+    "detection_rules": {"has_error": true, "error_contains": "unexpected parameter"},
+    "is_builtin": true
+  },
+  {
+    "name": "Invented Schema",
+    "description": "Agent references database tables or columns that do not exist.",
+    "category": "hallucination",
+    "severity": "high",
+    "detection_rules": {"has_error": true, "error_contains": "no such"},
+    "is_builtin": true
+  },
+  {
+    "name": "Confident Wrong Answer",
+    "description": "Agent provides a definitive answer that contradicts the provided context.",
+    "category": "hallucination",
+    "severity": "critical",
+    "detection_rules": {"has_error": true, "error_contains": "contradicts"},
+    "is_builtin": true
+  },
+  {
+    "name": "Ghost Dependency",
+    "description": "Agent imports or references libraries and packages that do not exist.",
+    "category": "hallucination",
+    "severity": "medium",
+    "detection_rules": {"has_error": true, "error_contains": "undefined"},
+    "is_builtin": true
+  },
+  {
+    "name": "False Capability Claim",
+    "description": "Agent claims to perform an action it cannot actually perform (e.g., accessing the internet).",
+    "category": "hallucination",
+    "severity": "medium",
+    "detection_rules": {"has_error": true, "error_contains": "not supported"},
+    "is_builtin": true
+  },
+  {
+    "name": "Misattributed Source",
+    "description": "Agent attributes information to the wrong source document.",
+    "category": "hallucination",
+    "severity": "medium",
+    "detection_rules": {"has_error": true, "error_contains": "source mismatch"},
+    "is_builtin": true
+  },
+  {
+    "name": "Request Timeout",
+    "description": "LLM API call exceeds the configured timeout threshold.",
+    "category": "timeout",
+    "severity": "high",
+    "detection_rules": {"status": "timeout"},
+    "is_builtin": true
+  },
+  {
+    "name": "Slow Response",
+    "description": "Session duration exceeds acceptable response time threshold.",
+    "category": "timeout",
+    "severity": "medium",
+    "detection_rules": {"min_duration_ms": 30000},
+    "is_builtin": true
+  },
+  {
+    "name": "Deadline Exceeded",
+    "description": "Agent operation exceeds the maximum allowed execution time.",
+    "category": "timeout",
+    "severity": "critical",
+    "detection_rules": {"min_duration_ms": 60000},
+    "is_builtin": true
+  },
+  {
+    "name": "Cascading Timeout",
+    "description": "Timeout in one service causes cascading timeouts in dependent calls.",
+    "category": "timeout",
+    "severity": "critical",
+    "detection_rules": {"status": "timeout", "min_spans": 5},
+    "is_builtin": true
+  },
+  {
+    "name": "Stalled Session",
+    "description": "Session remains in running state for an unusually long time.",
+    "category": "timeout",
+    "severity": "medium",
+    "detection_rules": {"status": "running", "min_duration_ms": 120000},
+    "is_builtin": true
+  },
+  {
+    "name": "Tool Execution Timeout",
+    "description": "A tool call takes significantly longer than expected to complete.",
+    "category": "timeout",
+    "severity": "high",
+    "detection_rules": {"min_duration_ms": 45000},
+    "is_builtin": true
+  },
+  {
+    "name": "Retrieval Timeout",
+    "description": "RAG retrieval step times out, leaving the agent without context.",
+    "category": "timeout",
+    "severity": "high",
+    "detection_rules": {"min_duration_ms": 15000, "has_error": true},
+    "is_builtin": true
+  },
+  {
+    "name": "API Rate Limit Error",
+    "description": "LLM provider returns a rate limit (429) error.",
+    "category": "error",
+    "severity": "high",
+    "detection_rules": {"has_error": true, "error_contains": "rate limit"},
+    "is_builtin": true
+  },
+  {
+    "name": "Authentication Error",
+    "description": "API key is invalid, expired, or missing.",
+    "category": "error",
+    "severity": "critical",
+    "detection_rules": {"has_error": true, "error_contains": "unauthorized"},
+    "is_builtin": true
+  },
+  {
+    "name": "JSON Parse Failure",
+    "description": "Agent output is not valid JSON when structured output was expected.",
+    "category": "error",
+    "severity": "medium",
+    "detection_rules": {"has_error": true, "error_contains": "json"},
+    "is_builtin": true
+  },
+  {
+    "name": "Type Mismatch Error",
+    "description": "Agent returns data of an unexpected type, causing downstream failures.",
+    "category": "error",
+    "severity": "medium",
+    "detection_rules": {"has_error": true, "error_contains": "type"},
+    "is_builtin": true
+  },
+  {
+    "name": "Context Window Exceeded",
+    "description": "Input exceeds the model's maximum context window.",
+    "category": "error",
+    "severity": "high",
+    "detection_rules": {"has_error": true, "error_contains": "context length"},
+    "is_builtin": true
+  },
+  {
+    "name": "Model Not Found",
+    "description": "The requested model is not available or has been deprecated.",
+    "category": "error",
+    "severity": "high",
+    "detection_rules": {"has_error": true, "error_contains": "model not found"},
+    "is_builtin": true
+  },
+  {
+    "name": "Provider Unavailable",
+    "description": "LLM provider is temporarily unavailable (5xx error).",
+    "category": "error",
+    "severity": "critical",
+    "detection_rules": {"has_error": true, "error_contains": "service unavailable"},
+    "is_builtin": true
+  },
+  {
+    "name": "Invalid Tool Arguments",
+    "description": "Agent passes invalid arguments to a tool call.",
+    "category": "error",
+    "severity": "medium",
+    "detection_rules": {"has_error": true, "error_contains": "invalid argument"},
+    "is_builtin": true
+  },
+  {
+    "name": "Missing Required Field",
+    "description": "Agent output is missing a required field in the expected schema.",
+    "category": "error",
+    "severity": "medium",
+    "detection_rules": {"has_error": true, "error_contains": "required field"},
+    "is_builtin": true
+  },
+  {
+    "name": "Permission Denied",
+    "description": "Agent attempts to access a resource it does not have permission for.",
+    "category": "error",
+    "severity": "high",
+    "detection_rules": {"has_error": true, "error_contains": "permission denied"},
+    "is_builtin": true
+  },
+  {
+    "name": "Content Filter Triggered",
+    "description": "LLM provider content filter blocked the response.",
+    "category": "error",
+    "severity": "medium",
+    "detection_rules": {"has_error": true, "error_contains": "content filter"},
+    "is_builtin": true
+  },
+  {
+    "name": "Empty LLM Response",
+    "description": "LLM returns an empty or null response.",
+    "category": "error",
+    "severity": "high",
+    "detection_rules": {"has_error": true, "error_contains": "empty response"},
+    "is_builtin": true
+  },
+  {
+    "name": "Connection Reset",
+    "description": "Network connection to the LLM provider was unexpectedly reset.",
+    "category": "error",
+    "severity": "high",
+    "detection_rules": {"has_error": true, "error_contains": "connection reset"},
+    "is_builtin": true
+  },
+  {
+    "name": "Excessive Token Usage",
+    "description": "Session consumes significantly more tokens than expected.",
+    "category": "cost",
+    "severity": "high",
+    "detection_rules": {"max_tokens": 100000},
+    "is_builtin": true
+  },
+  {
+    "name": "Cost Overrun",
+    "description": "Session cost exceeds the expected budget threshold.",
+    "category": "cost",
+    "severity": "critical",
+    "detection_rules": {"max_cost_cents": 500},
+    "is_builtin": true
+  },
+  {
+    "name": "Repeated Expensive Calls",
+    "description": "Agent makes multiple calls to expensive models when cheaper alternatives exist.",
+    "category": "cost",
+    "severity": "medium",
+    "detection_rules": {"max_cost_cents": 200, "min_spans": 10},
+    "is_builtin": true
+  },
+  {
+    "name": "Unnecessary Large Context",
+    "description": "Agent sends unnecessarily large context to the model, inflating costs.",
+    "category": "cost",
+    "severity": "medium",
+    "detection_rules": {"max_tokens": 50000},
+    "is_builtin": true
+  },
+  {
+    "name": "Cost Spike",
+    "description": "Session cost is more than 10x the average cost for this agent.",
+    "category": "cost",
+    "severity": "high",
+    "detection_rules": {"max_cost_cents": 1000},
+    "is_builtin": true
+  },
+  {
+    "name": "Redundant API Calls",
+    "description": "Agent makes duplicate API calls with identical parameters.",
+    "category": "cost",
+    "severity": "medium",
+    "detection_rules": {"min_spans": 15, "max_cost_cents": 300},
+    "is_builtin": true
+  },
+  {
+    "name": "Premium Model Overuse",
+    "description": "Agent uses premium models for simple tasks that could use cheaper models.",
+    "category": "cost",
+    "severity": "medium",
+    "detection_rules": {"max_cost_cents": 100, "min_spans": 5},
+    "is_builtin": true
+  },
+  {
+    "name": "Unbounded Generation",
+    "description": "LLM generates an unusually long response consuming excessive output tokens.",
+    "category": "cost",
+    "severity": "high",
+    "detection_rules": {"max_tokens": 80000},
+    "is_builtin": true
+  },
+  {
+    "name": "Session Failure with High Cost",
+    "description": "Session fails after consuming significant resources.",
+    "category": "cost",
+    "severity": "critical",
+    "detection_rules": {"status": "failed", "max_cost_cents": 100},
+    "is_builtin": true
+  },
+  {
+    "name": "Generic Failure",
+    "description": "Session ends in a failed state for any reason.",
+    "category": "error",
+    "severity": "medium",
+    "detection_rules": {"status": "failed"},
+    "is_builtin": true
+  }
+]

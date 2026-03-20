@@ -1,0 +1,161 @@
+[
+  {
+    "name": "PII Detection",
+    "description": "Detects personally identifiable information such as email addresses, phone numbers, SSNs, credit card numbers, and IP addresses using regex patterns.",
+    "type": "pii",
+    "mode": "block",
+    "apply_to": "both",
+    "config": {
+      "patterns": {
+        "email": "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b",
+        "phone_us": "\\b(?:\\+1[-.]?)?\\(?\\d{3}\\)?[-.]?\\d{3}[-.]?\\d{4}\\b",
+        "phone_intl": "\\b\\+\\d{1,3}[-.]?\\d{4,14}\\b",
+        "ssn": "\\b\\d{3}-\\d{2}-\\d{4}\\b",
+        "credit_card": "\\b(?:\\d{4}[-\\s]?){3}\\d{4}\\b",
+        "ip_address": "\\b\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b"
+      },
+      "action_on_detect": "redact",
+      "redaction_char": "X"
+    },
+    "is_builtin": true,
+    "priority": 100
+  },
+  {
+    "name": "Prompt Injection Guard",
+    "description": "Detects prompt injection attempts using pattern matching and optional LLM verification. Catches common injection techniques like role overrides, instruction ignoring, and system prompt extraction.",
+    "type": "injection",
+    "mode": "block",
+    "apply_to": "input",
+    "config": {
+      "patterns": [
+        "ignore previous instructions",
+        "ignore all previous",
+        "disregard your instructions",
+        "forget your instructions",
+        "you are now",
+        "new instructions:",
+        "system prompt:",
+        "reveal your prompt",
+        "show me your system",
+        "override your",
+        "act as if you",
+        "pretend you are",
+        "jailbreak",
+        "DAN mode"
+      ],
+      "use_llm_verification": false,
+      "case_sensitive": false,
+      "llm_model": "gpt-4o-mini"
+    },
+    "is_builtin": true,
+    "priority": 90
+  },
+  {
+    "name": "Toxicity Filter",
+    "description": "Uses LLM-based analysis to detect toxic, offensive, harassing, or inappropriate content in both input and output.",
+    "type": "toxicity",
+    "mode": "block",
+    "apply_to": "both",
+    "config": {
+      "categories": ["hate_speech", "harassment", "violence", "sexual_content", "self_harm", "profanity"],
+      "threshold": 0.7,
+      "llm_model": "gpt-4o-mini",
+      "prompt_template": "Analyze the following text for toxic content. Rate the toxicity on a scale of 0 to 1 for each category: hate speech, harassment, violence, sexual content, self-harm, profanity.\n\nText: {{text}}\n\nRespond in JSON format with category scores."
+    },
+    "is_builtin": true,
+    "priority": 80
+  },
+  {
+    "name": "Hallucination Detection",
+    "description": "Uses LLM-based analysis to detect when the model generates information not grounded in the provided context or known facts.",
+    "type": "hallucination",
+    "mode": "warn",
+    "apply_to": "output",
+    "config": {
+      "threshold": 0.6,
+      "llm_model": "gpt-4o-mini",
+      "check_factual_consistency": true,
+      "check_source_attribution": true,
+      "prompt_template": "Given the context and the response, determine if the response contains hallucinated information not supported by the context. Rate the hallucination risk on a scale of 0 to 1.\n\nContext: {{context}}\nResponse: {{text}}\n\nHallucination score (0-1):"
+    },
+    "is_builtin": true,
+    "priority": 70
+  },
+  {
+    "name": "Topic Guard",
+    "description": "Uses LLM-based analysis to ensure the conversation stays within allowed topics and does not veer into restricted areas.",
+    "type": "topic",
+    "mode": "block",
+    "apply_to": "both",
+    "config": {
+      "allowed_topics": [],
+      "blocked_topics": ["politics", "religion", "medical_advice", "legal_advice", "financial_advice"],
+      "threshold": 0.7,
+      "llm_model": "gpt-4o-mini",
+      "prompt_template": "Determine if the following text relates to any of these restricted topics: {{blocked_topics}}. Rate the likelihood on a scale of 0 to 1.\n\nText: {{text}}\n\nTopic violation score (0-1):"
+    },
+    "is_builtin": true,
+    "priority": 60
+  },
+  {
+    "name": "Code Execution Guard",
+    "description": "Detects potentially dangerous code execution patterns such as system commands, file operations, network calls, and eval statements using regex.",
+    "type": "code_exec",
+    "mode": "block",
+    "apply_to": "output",
+    "config": {
+      "patterns": [
+        "os\\.system\\(",
+        "subprocess\\.",
+        "exec\\(",
+        "eval\\(",
+        "__import__\\(",
+        "open\\(.+,\\s*['\"]w",
+        "shutil\\.rmtree",
+        "rm\\s+-rf",
+        "curl\\s+.*\\|\\s*bash",
+        "wget\\s+.*\\|\\s*sh",
+        "chmod\\s+777",
+        "sudo\\s+",
+        "DROP\\s+TABLE",
+        "DELETE\\s+FROM",
+        "TRUNCATE\\s+"
+      ],
+      "case_sensitive": false,
+      "allow_sandboxed": true
+    },
+    "is_builtin": true,
+    "priority": 85
+  },
+  {
+    "name": "Length Guard",
+    "description": "Enforces minimum and maximum length constraints on input and output to prevent abuse and ensure quality.",
+    "type": "length",
+    "mode": "block",
+    "apply_to": "both",
+    "config": {
+      "input_min_length": 1,
+      "input_max_length": 50000,
+      "output_min_length": 1,
+      "output_max_length": 100000,
+      "unit": "characters"
+    },
+    "is_builtin": true,
+    "priority": 95
+  },
+  {
+    "name": "Custom Policy Guard",
+    "description": "User-defined guardrail that uses a custom LLM prompt to enforce organization-specific policies and rules.",
+    "type": "custom",
+    "mode": "warn",
+    "apply_to": "both",
+    "config": {
+      "policy_prompt": "You are a policy compliance checker. Evaluate whether the following text complies with the organization's acceptable use policy. Consider professionalism, accuracy, and brand safety.\n\nText: {{text}}\n\nDoes this comply with the policy? Respond with a score from 0 to 1, where 1 is fully compliant.",
+      "threshold": 0.7,
+      "llm_model": "gpt-4o-mini",
+      "custom_rules": []
+    },
+    "is_builtin": true,
+    "priority": 50
+  }
+]
