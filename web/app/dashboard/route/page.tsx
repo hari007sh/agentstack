@@ -7,22 +7,22 @@ import {
   Database,
   Clock,
   Server,
-  CheckCircle2,
-  XCircle,
+  Network,
   AlertCircle,
   RefreshCw,
+  ArrowRight,
+  Copy,
+  Check,
 } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { DonutChart } from "@/components/charts";
 import {
   fadeIn,
   staggerContainer,
-  staggerItem,
 } from "@/lib/animations";
 import {
   SkeletonMetricCards,
   SkeletonChart,
-  SkeletonTable,
 } from "@/components/skeleton";
 import { api } from "@/lib/api";
 
@@ -54,141 +54,8 @@ interface ProviderResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Mock / Fallback Data
-// ---------------------------------------------------------------------------
-
-const mockMetrics = {
-  total_requests: 184320,
-  cache_hit_rate: 34.2,
-  avg_latency_ms: 245,
-  active_providers: 4,
-};
-
-interface GatewayRequest {
-  id: string;
-  time_ago: string;
-  model: string;
-  provider: string;
-  status: "success" | "error";
-  tokens: number;
-  cost_cents: number;
-  latency_ms: number;
-  cache_hit: boolean;
-}
-
-const mockRequests: GatewayRequest[] = [
-  {
-    id: "req_001",
-    time_ago: "5s ago",
-    model: "gpt-4o",
-    provider: "openai",
-    status: "success",
-    tokens: 1240,
-    cost_cents: 4,
-    latency_ms: 320,
-    cache_hit: false,
-  },
-  {
-    id: "req_002",
-    time_ago: "12s ago",
-    model: "claude-3-5-sonnet",
-    provider: "anthropic",
-    status: "success",
-    tokens: 890,
-    cost_cents: 3,
-    latency_ms: 18,
-    cache_hit: true,
-  },
-  {
-    id: "req_003",
-    time_ago: "28s ago",
-    model: "gpt-4o-mini",
-    provider: "openai",
-    status: "success",
-    tokens: 2100,
-    cost_cents: 1,
-    latency_ms: 185,
-    cache_hit: false,
-  },
-  {
-    id: "req_004",
-    time_ago: "45s ago",
-    model: "gemini-1.5-pro",
-    provider: "google",
-    status: "error",
-    tokens: 0,
-    cost_cents: 0,
-    latency_ms: 5200,
-    cache_hit: false,
-  },
-  {
-    id: "req_005",
-    time_ago: "1 min ago",
-    model: "llama-3.1-70b",
-    provider: "together",
-    status: "success",
-    tokens: 1560,
-    cost_cents: 1,
-    latency_ms: 410,
-    cache_hit: false,
-  },
-  {
-    id: "req_006",
-    time_ago: "1 min ago",
-    model: "gpt-4o",
-    provider: "openai",
-    status: "success",
-    tokens: 680,
-    cost_cents: 2,
-    latency_ms: 12,
-    cache_hit: true,
-  },
-  {
-    id: "req_007",
-    time_ago: "2 min ago",
-    model: "claude-3-5-sonnet",
-    provider: "anthropic",
-    status: "success",
-    tokens: 3200,
-    cost_cents: 8,
-    latency_ms: 540,
-    cache_hit: false,
-  },
-  {
-    id: "req_008",
-    time_ago: "3 min ago",
-    model: "mixtral-8x7b",
-    provider: "groq",
-    status: "success",
-    tokens: 920,
-    cost_cents: 0,
-    latency_ms: 95,
-    cache_hit: false,
-  },
-];
-
-// Provider distribution for donut chart (mock fallback)
-const mockProviderDistribution = [
-  { label: "OpenAI", value: 82450, color: "#10a37f" },
-  { label: "Anthropic", value: 41080, color: "#d4a574" },
-  { label: "Google", value: 27650, color: "#4285f4" },
-  { label: "Together", value: 18430, color: "#ff6b35" },
-  { label: "Groq", value: 11070, color: "#f55036" },
-  { label: "Mistral", value: 3640, color: "#ff7000" },
-];
-
-// ---------------------------------------------------------------------------
 // Color maps
 // ---------------------------------------------------------------------------
-
-const providerColors: Record<string, string> = {
-  openai: "var(--accent-green)",
-  anthropic: "var(--accent-amber)",
-  google: "var(--accent-blue)",
-  together: "var(--accent-purple)",
-  groq: "var(--healing-blue)",
-  mistral: "var(--accent-red)",
-};
 
 const providerChartColors: Record<string, string> = {
   openai: "#10a37f",
@@ -207,29 +74,12 @@ function getProviderChartColor(name: string, idx: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Code snippet for the empty state
 // ---------------------------------------------------------------------------
 
-function formatTokens(tokens: number): string {
-  if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`;
-  return tokens.toLocaleString();
-}
-
-function formatCost(cents: number): string {
-  return `$${(cents / 100).toFixed(2)}`;
-}
-
-function getLatencyColor(ms: number): string {
-  if (ms > 1000) return "var(--accent-red)";
-  if (ms > 500) return "var(--accent-red)";
-  if (ms > 300) return "var(--accent-amber)";
-  return "var(--text-secondary)";
-}
-
-function getLatencyWeight(ms: number): string {
-  if (ms > 500) return "font-medium";
-  return "";
-}
+const GATEWAY_SNIPPET = `curl http://localhost:8090/v1/chat/completions \\
+  -H "Authorization: Bearer your-api-key" \\
+  -d '{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hello"}]}'`;
 
 // ---------------------------------------------------------------------------
 // Page Component
@@ -238,12 +88,18 @@ function getLatencyWeight(ms: number): string {
 export default function RouteOverviewPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [usingMock, setUsingMock] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  // Real data state
-  const [metrics, setMetrics] = useState(mockMetrics);
-  const [requests, setRequests] = useState<GatewayRequest[]>(mockRequests);
-  const [providerDistribution, setProviderDistribution] = useState(mockProviderDistribution);
+  // Real data state — initialized to zeros/empty
+  const [metrics, setMetrics] = useState({
+    total_requests: 0,
+    cache_hit_rate: 0,
+    avg_latency_ms: 0,
+    active_providers: 0,
+  });
+  const [providerDistribution, setProviderDistribution] = useState<
+    { label: string; value: number; color: string }[]
+  >([]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -282,14 +138,8 @@ export default function RouteOverviewPage() {
         active_providers: activeProviders,
       });
 
-      // --- Build provider distribution for donut chart from providers list ---
-      // Since we don't have a per-provider request count endpoint, we use the
-      // provider list and mock request counts based on what we have.
-      // If there are real providers, show them with equal distribution as placeholder;
-      // if there are none, use the mock data.
+      // --- Build provider distribution for donut chart ---
       if (Array.isArray(providers) && providers.length > 0 && totalReqs > 0) {
-        // We don't have per-provider counts, so distribute total evenly as a
-        // placeholder until a per-provider analytics endpoint is built
         const perProvider = Math.round(totalReqs / providers.length);
         const distribution = providers.map((p, idx) => ({
           label: p.display_name || p.name,
@@ -297,23 +147,14 @@ export default function RouteOverviewPage() {
           color: getProviderChartColor(p.name, idx),
         }));
         setProviderDistribution(distribution);
+      } else {
+        setProviderDistribution([]);
       }
-      // else: keep mock distribution
-
-      // --- Requests table ---
-      // There's no list gateway requests endpoint on the backend, so we keep
-      // mock data for the requests table. The table will show mock data as
-      // a graceful fallback.
-      // The requests state is left as mockRequests (no change needed).
-
-      setUsingMock(false);
     } catch (err) {
-      console.warn("[GatewayPage] API fetch failed, using mock data:", err);
-      // Fall back to mock data
-      setMetrics(mockMetrics);
-      setRequests(mockRequests);
-      setProviderDistribution(mockProviderDistribution);
-      setUsingMock(true);
+      console.error("[GatewayPage] API fetch failed:", err);
+      setError(
+        err instanceof Error ? err.message : "Failed to load gateway data. Please check your connection and try again."
+      );
     } finally {
       setLoading(false);
     }
@@ -323,7 +164,18 @@ export default function RouteOverviewPage() {
     fetchData();
   }, [fetchData]);
 
-  const isEmpty = !loading && requests.length === 0 && metrics.total_requests === 0;
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(GATEWAY_SNIPPET);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API not available
+    }
+  }, []);
+
+  const hasData = !loading && !error && metrics.total_requests > 0;
+  const isEmpty = !loading && !error && !hasData;
 
   return (
     <motion.div
@@ -340,8 +192,8 @@ export default function RouteOverviewPage() {
         </p>
       </div>
 
-      {/* Error Banner */}
-      {error && (
+      {/* Error State */}
+      {error && !loading && (
         <div className="rounded-xl border border-[var(--accent-red)]/20 bg-[var(--accent-red)]/5 px-5 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <AlertCircle className="w-5 h-5 text-[var(--accent-red)]" />
@@ -357,20 +209,10 @@ export default function RouteOverviewPage() {
         </div>
       )}
 
-      {/* Mock Data Indicator */}
-      {usingMock && !loading && (
-        <div className="rounded-lg border border-[var(--accent-amber)]/20 bg-[var(--accent-amber)]/5 px-4 py-2 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-[var(--accent-amber)]" />
-          <p className="text-xs text-[var(--accent-amber)]">
-            Showing sample data. Connect the backend to see real metrics.
-          </p>
-        </div>
-      )}
-
-      {/* Metric Cards */}
+      {/* Metric Cards — always show real values (zeros when empty) */}
       {loading ? (
         <SkeletonMetricCards count={4} />
-      ) : (
+      ) : !error ? (
         <motion.div
           variants={staggerContainer}
           initial="hidden"
@@ -382,7 +224,6 @@ export default function RouteOverviewPage() {
             value={metrics.total_requests}
             icon={Route}
             color="blue"
-            change={18.4}
           />
           <MetricCard
             title="Cache Hit Rate"
@@ -390,7 +231,6 @@ export default function RouteOverviewPage() {
             format="percent"
             icon={Database}
             color="green"
-            change={4.2}
           />
           <MetricCard
             title="Avg Latency"
@@ -398,7 +238,6 @@ export default function RouteOverviewPage() {
             format="duration"
             icon={Clock}
             color="purple"
-            change={-8.5}
           />
           <MetricCard
             title="Active Providers"
@@ -407,12 +246,12 @@ export default function RouteOverviewPage() {
             color="amber"
           />
         </motion.div>
-      )}
+      ) : null}
 
-      {/* Request Distribution by Provider */}
+      {/* Provider Distribution Chart — only when there is real data */}
       {loading ? (
         <SkeletonChart />
-      ) : (
+      ) : hasData && providerDistribution.length > 0 ? (
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-5">
           <h3 className="text-sm font-medium mb-4">
             Request Distribution by Provider
@@ -422,140 +261,71 @@ export default function RouteOverviewPage() {
             height={240}
           />
         </div>
-      )}
-
-      {/* Loading */}
-      {loading && <SkeletonTable rows={6} cols={8} />}
+      ) : null}
 
       {/* Empty State */}
       {isEmpty && (
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-16 text-center">
           <div className="w-12 h-12 rounded-xl bg-[var(--accent-blue)]/10 flex items-center justify-center mx-auto mb-4">
-            <Route className="w-6 h-6 text-[var(--accent-blue)]" />
+            <Network className="w-6 h-6 text-[var(--accent-blue)]" />
           </div>
-          <h3 className="text-sm font-medium mb-1">No gateway requests yet</h3>
-          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto">
-            Route LLM requests through the AgentStack gateway to see traffic
-            analytics here.
+          <h3 className="text-sm font-medium mb-2">No gateway traffic yet</h3>
+          <p className="text-xs text-[var(--text-tertiary)] max-w-md mx-auto leading-relaxed mb-6">
+            Route your LLM requests through the AgentStack gateway for automatic
+            model routing, caching, and failover.
           </p>
-        </div>
-      )}
 
-      {/* Table */}
-      {!loading && requests.length > 0 && (
-        <motion.div
-          variants={staggerContainer}
-          initial="hidden"
-          animate="visible"
-          className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] overflow-hidden"
-        >
-          <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
-            <h3 className="text-sm font-medium">Recent Requests</h3>
+          {/* Code snippet */}
+          <div className="max-w-lg mx-auto mb-6 text-left">
+            <div className="relative rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-subtle)]">
+                <span className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+                  Quick Start
+                </span>
+                <button
+                  onClick={handleCopy}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3 h-3 text-[var(--accent-green)]" />
+                      <span className="text-[var(--accent-green)]">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3 h-3" />
+                      Copy
+                    </>
+                  )}
+                </button>
+              </div>
+              <pre className="p-4 text-xs leading-relaxed overflow-x-auto">
+                <code className="font-mono text-[var(--text-secondary)]">
+                  {GATEWAY_SNIPPET}
+                </code>
+              </pre>
+            </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[var(--border-subtle)]">
-                  {[
-                    "Time",
-                    "Model",
-                    "Provider",
-                    "Status",
-                    "Tokens",
-                    "Cost",
-                    "Latency",
-                    "Cache",
-                  ].map((header) => (
-                    <th
-                      key={header}
-                      className="text-left px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium"
-                    >
-                      {header}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {requests.map((req) => (
-                  <motion.tr
-                    key={req.id}
-                    variants={staggerItem}
-                    className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer group"
-                  >
-                    <td className="px-5 py-3 text-xs text-[var(--text-tertiary)] whitespace-nowrap">
-                      {req.time_ago}
-                    </td>
-                    <td className="px-5 py-3 text-sm font-mono">
-                      {req.model}
-                    </td>
-                    <td className="px-5 py-3">
-                      <span
-                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium capitalize border"
-                        style={{
-                          backgroundColor: `color-mix(in srgb, ${providerColors[req.provider] || "var(--text-tertiary)"} 10%, transparent)`,
-                          color: providerColors[req.provider] || "var(--text-tertiary)",
-                          borderColor: `color-mix(in srgb, ${providerColors[req.provider] || "var(--text-tertiary)"} 20%, transparent)`,
-                        }}
-                      >
-                        {req.provider}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-1.5">
-                        {req.status === "success" ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-[var(--accent-green)]" />
-                        ) : (
-                          <XCircle className="w-3.5 h-3.5 text-[var(--accent-red)]" />
-                        )}
-                        <span
-                          className="text-xs capitalize font-medium"
-                          style={{
-                            color:
-                              req.status === "success"
-                                ? "var(--accent-green)"
-                                : "var(--accent-red)",
-                          }}
-                        >
-                          {req.status}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)] tabular-nums">
-                      {req.tokens > 0 ? formatTokens(req.tokens) : "\u2014"}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)] tabular-nums">
-                      {req.cost_cents > 0
-                        ? formatCost(req.cost_cents)
-                        : "\u2014"}
-                    </td>
-                    <td className="px-5 py-3 tabular-nums">
-                      <span
-                        className={`text-sm ${getLatencyWeight(req.latency_ms)}`}
-                        style={{
-                          color: getLatencyColor(req.latency_ms),
-                        }}
-                      >
-                        {req.latency_ms}ms
-                      </span>
-                    </td>
-                    <td className="px-5 py-3">
-                      {req.cache_hit ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)]" />
-                          HIT
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
-                          MISS
-                        </span>
-                      )}
-                    </td>
-                  </motion.tr>
-                ))}
-              </tbody>
-            </table>
+
+          <div className="flex items-center justify-center gap-3">
+            <a
+              href="/dashboard/route/providers"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-[var(--accent-blue)] text-white hover:bg-[var(--accent-blue)]/90 transition-colors"
+            >
+              Add Provider
+              <ArrowRight className="w-3.5 h-3.5" />
+            </a>
+            <a
+              href="https://docs.agentstack.dev/gateway"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+            >
+              View Docs
+              <ArrowRight className="w-3.5 h-3.5" />
+            </a>
           </div>
-        </motion.div>
+        </div>
       )}
     </motion.div>
   );

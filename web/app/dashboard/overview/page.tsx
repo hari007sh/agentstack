@@ -13,6 +13,10 @@ import {
   ShieldCheck,
   Eye,
   RefreshCw,
+  Rocket,
+  Copy,
+  Check,
+  ExternalLink,
 } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { ReliabilityScore } from "@/components/reliability-score";
@@ -95,49 +99,6 @@ interface ChartPoint {
 }
 
 // ---------------------------------------------------------------------------
-// Mock / fallback data
-// ---------------------------------------------------------------------------
-
-const mockStats = {
-  total_sessions: 12847,
-  active_sessions: 23,
-  failure_rate: 4.2,
-  total_cost_cents: 284750,
-  healing_interventions: 342,
-  healing_success_rate: 94.7,
-  reliability_score: 95.8,
-  avg_cost_cents: 22,
-};
-
-const mockRecentSessions: RecentSession[] = [
-  { id: "ses_1a2b3c", agent: "Research Agent", status: "completed", duration: 4200, cost: 15, tokens: 8420, time: "2 min ago" },
-  { id: "ses_4d5e6f", agent: "Code Review Agent", status: "healed", duration: 12300, cost: 42, tokens: 21500, time: "5 min ago" },
-  { id: "ses_7g8h9i", agent: "Support Agent", status: "failed", duration: 1800, cost: 8, tokens: 3200, time: "12 min ago" },
-  { id: "ses_0j1k2l", agent: "Research Agent", status: "completed", duration: 3100, cost: 12, tokens: 6300, time: "15 min ago" },
-  { id: "ses_3m4n5o", agent: "Data Pipeline Agent", status: "running", duration: 0, cost: 3, tokens: 1200, time: "just now" },
-];
-
-const mockSessionsOverTime: ChartPoint[] = [
-  { label: "Mar 14", value: 1620 },
-  { label: "Mar 15", value: 1840 },
-  { label: "Mar 16", value: 1735 },
-  { label: "Mar 17", value: 2105 },
-  { label: "Mar 18", value: 1950 },
-  { label: "Mar 19", value: 2280 },
-  { label: "Mar 20", value: 1917 },
-];
-
-const mockFailureRateData: ChartPoint[] = [
-  { label: "Mar 14", value: 5.8 },
-  { label: "Mar 15", value: 5.2 },
-  { label: "Mar 16", value: 6.1 },
-  { label: "Mar 17", value: 4.7 },
-  { label: "Mar 18", value: 4.4 },
-  { label: "Mar 19", value: 3.9 },
-  { label: "Mar 20", value: 4.2 },
-];
-
-// ---------------------------------------------------------------------------
 // Normalised session type used by the table
 // ---------------------------------------------------------------------------
 
@@ -204,11 +165,26 @@ function buildTimeRangeParams(): { start: string; end: string } {
 }
 
 // ---------------------------------------------------------------------------
+// Stats shape
+// ---------------------------------------------------------------------------
+
+interface DashboardStats {
+  total_sessions: number;
+  active_sessions: number;
+  failure_rate: number;
+  total_cost_cents: number;
+  healing_interventions: number;
+  healing_success_rate: number;
+  reliability_score: number;
+  avg_cost_cents: number;
+}
+
+// ---------------------------------------------------------------------------
 // Data-fetching hook
 // ---------------------------------------------------------------------------
 
 interface DashboardData {
-  stats: typeof mockStats;
+  stats: DashboardStats;
   recentSessions: RecentSession[];
   sessionsChart: ChartPoint[];
   failureChart: ChartPoint[];
@@ -220,12 +196,10 @@ function useDashboardData() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [error, setError] = useState<string | null>(null);
-  const [usingMock, setUsingMock] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoadState("loading");
     setError(null);
-    setUsingMock(false);
 
     // Inject the JWT token from localStorage into the API client
     if (typeof window !== "undefined") {
@@ -259,7 +233,7 @@ function useDashboardData() {
         ]);
 
       // Transform the API responses into the shapes expected by the UI
-      const stats = {
+      const stats: DashboardStats = {
         total_sessions: overviewRes.total_sessions,
         active_sessions: 0, // not directly available from the overview endpoint
         failure_rate: overviewRes.failure_rate * 100, // backend returns 0-1 fraction
@@ -273,7 +247,7 @@ function useDashboardData() {
       const recentSessions: RecentSession[] =
         sessionsRes.sessions && sessionsRes.sessions.length > 0
           ? sessionsRes.sessions.map(apiSessionToRecentSession)
-          : mockRecentSessions;
+          : [];
 
       const sessionsChart: ChartPoint[] =
         sessionsTimeRes.data && sessionsTimeRes.data.length > 0
@@ -281,7 +255,7 @@ function useDashboardData() {
               label: formatTimestampLabel(p.timestamp),
               value: p.count,
             }))
-          : mockSessionsOverTime;
+          : [];
 
       const failureChart: ChartPoint[] =
         failureRes.data && failureRes.data.length > 0
@@ -289,23 +263,12 @@ function useDashboardData() {
               label: formatTimestampLabel(p.timestamp),
               value: p.failure_rate * 100, // convert fraction to percentage
             }))
-          : mockFailureRateData;
+          : [];
 
       setData({ stats, recentSessions, sessionsChart, failureChart });
       setLoadState("loaded");
     } catch (err) {
-      // Fallback to mock data on any error
-      console.warn("[Overview] API fetch failed, falling back to mock data:", err);
-
-      const fallbackData: DashboardData = {
-        stats: mockStats,
-        recentSessions: mockRecentSessions,
-        sessionsChart: mockSessionsOverTime,
-        failureChart: mockFailureRateData,
-      };
-
-      setData(fallbackData);
-      setUsingMock(true);
+      console.error("[Overview] API fetch failed:", err);
 
       if (err instanceof ApiError) {
         setError(`API error (${err.status}): ${err.message}`);
@@ -315,7 +278,7 @@ function useDashboardData() {
         setError("Failed to connect to the API server");
       }
 
-      setLoadState("loaded"); // still "loaded" because we have fallback data to display
+      setLoadState("error");
     }
   }, []);
 
@@ -323,7 +286,7 @@ function useDashboardData() {
     fetchData();
   }, [fetchData]);
 
-  return { data, loadState, error, usingMock, retry: fetchData };
+  return { data, loadState, error, retry: fetchData };
 }
 
 // ---------------------------------------------------------------------------
@@ -418,11 +381,133 @@ function ReliabilityScoreSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
+// Copy button helper
+// ---------------------------------------------------------------------------
+
+function CopyButton({ text, className = "" }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [text]);
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors ${
+        copied
+          ? "text-[var(--accent-green)] bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/20"
+          : "text-[var(--text-secondary)] bg-[var(--bg-hover)] border border-[var(--border-subtle)] hover:border-[var(--border-default)] hover:text-[var(--text-primary)]"
+      } ${className}`}
+    >
+      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Empty state: Onboarding card (replaces charts when no data)
+// ---------------------------------------------------------------------------
+
+function OnboardingCard() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-8 lg:p-10"
+    >
+      <div className="flex flex-col items-center text-center max-w-lg mx-auto">
+        <div className="w-12 h-12 rounded-xl bg-[var(--accent-blue)]/10 flex items-center justify-center mb-4">
+          <Rocket className="w-6 h-6 text-[var(--accent-blue)]" />
+        </div>
+        <h3 className="text-[15px] font-semibold text-[var(--text-primary)] mb-1.5">
+          Get started with AgentStack
+        </h3>
+        <p className="text-[13px] text-[var(--text-secondary)] mb-6">
+          Install the SDK and start monitoring your AI agents in minutes.
+        </p>
+
+        <div className="w-full rounded-lg bg-[var(--bg-primary)] border border-[var(--border-subtle)] overflow-hidden mb-5">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)]">
+            <span className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+              Install
+            </span>
+            <CopyButton text={"pip install agentstack\n# or\nnpm install @agentstack/sdk"} />
+          </div>
+          <pre className="px-4 py-3 text-[12px] leading-relaxed font-mono text-[var(--text-secondary)] text-left overflow-x-auto">
+            <code>
+              <span className="text-[var(--accent-green)]">pip install</span> agentstack{"\n"}
+              <span className="text-[var(--text-tertiary)]"># or</span>{"\n"}
+              <span className="text-[var(--accent-green)]">npm install</span> @agentstack/sdk
+            </code>
+          </pre>
+        </div>
+
+        <a
+          href="https://docs.agentstack.dev"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-medium text-[var(--accent-blue)] bg-[var(--accent-blue)]/10 border border-[var(--accent-blue)]/20 hover:bg-[var(--accent-blue)]/15 transition-colors"
+        >
+          View Documentation
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      </div>
+    </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Empty state: Recent sessions (when 0 sessions)
+// ---------------------------------------------------------------------------
+
+function EmptyRecentSessions() {
+  return (
+    <div className="rounded-xl glass gradient-border overflow-hidden">
+      <div className="relative">
+        <div className="relative z-[3]">
+          <div className="px-5 py-3.5 border-b border-[var(--border-subtle)]">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[13px] font-medium text-[var(--text-primary)]">Recent Sessions</h3>
+            </div>
+          </div>
+          <div className="px-5 py-12 flex flex-col items-center text-center">
+            <div className="w-10 h-10 rounded-xl bg-[var(--accent-blue)]/10 flex items-center justify-center mb-3">
+              <Activity className="w-5 h-5 text-[var(--accent-blue)]" />
+            </div>
+            <h4 className="text-[13px] font-medium text-[var(--text-primary)] mb-1">
+              No sessions yet
+            </h4>
+            <p className="text-[12px] text-[var(--text-tertiary)] max-w-xs mb-4">
+              Sessions will appear here once your agents start running.
+            </p>
+            <a
+              href="https://docs.agentstack.dev/quickstart"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[var(--accent-blue)] hover:text-[var(--accent-blue)]/80 transition-colors"
+            >
+              View Setup Guide
+              <ArrowRight className="w-3 h-3" />
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page component
 // ---------------------------------------------------------------------------
 
 export default function OverviewPage() {
-  const { data, loadState, error, usingMock, retry } = useDashboardData();
+  const { data, loadState, error, retry } = useDashboardData();
 
   // Full loading state: show skeleton layout
   if (loadState === "loading" && !data) {
@@ -475,11 +560,54 @@ export default function OverviewPage() {
     );
   }
 
-  // We always have data at this point (either real or mock fallback)
-  const stats = data?.stats ?? mockStats;
-  const recentSessions = data?.recentSessions ?? mockRecentSessions;
-  const sessionsChart = data?.sessionsChart ?? mockSessionsOverTime;
-  const failureChart = data?.failureChart ?? mockFailureRateData;
+  // Error state: API failed entirely
+  if (loadState === "error") {
+    return (
+      <motion.div
+        variants={fadeIn}
+        initial="hidden"
+        animate="visible"
+        className="space-y-5"
+      >
+        {/* Header */}
+        <div>
+          <h1 className="text-xl font-semibold text-[var(--text-primary)]">Dashboard</h1>
+          <p className="text-[13px] text-[var(--text-secondary)] mt-0.5">
+            Monitor your AI agents in production
+          </p>
+        </div>
+
+        {/* Error card */}
+        <div className="rounded-xl border border-[var(--accent-red)]/20 bg-[var(--bg-elevated)] p-8 text-center">
+          <div className="w-12 h-12 rounded-xl bg-[var(--accent-red)]/10 flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle className="w-6 h-6 text-[var(--accent-red)]" />
+          </div>
+          <h3 className="text-sm font-medium text-[var(--text-primary)] mb-1">
+            Failed to load dashboard
+          </h3>
+          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto mb-4">
+            {error}
+          </p>
+          <button
+            onClick={retry}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-medium text-[var(--text-primary)] bg-[var(--bg-hover)] border border-[var(--border-default)] hover:bg-[var(--bg-elevated)] transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry
+          </button>
+        </div>
+      </motion.div>
+    );
+  }
+
+  // We have real data at this point (may be empty, but real)
+  const stats = data!.stats;
+  const recentSessions = data!.recentSessions;
+  const sessionsChart = data!.sessionsChart;
+  const failureChart = data!.failureChart;
+
+  const hasNoSessions = stats.total_sessions === 0;
+  const hasChartData = sessionsChart.length > 0 || failureChart.length > 0;
 
   return (
     <motion.div
@@ -488,29 +616,6 @@ export default function OverviewPage() {
       animate="visible"
       className="space-y-5"
     >
-      {/* Error banner with retry — shown when using mock fallback */}
-      {usingMock && error && (
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg bg-[var(--accent-red)]/8 border border-[var(--accent-red)]/20"
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <AlertTriangle className="w-4 h-4 text-[var(--accent-red)] flex-shrink-0" />
-            <p className="text-[12px] text-[var(--accent-red)] truncate">
-              {error} — showing demo data
-            </p>
-          </div>
-          <button
-            onClick={retry}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium text-[var(--accent-red)] bg-[var(--accent-red)]/10 hover:bg-[var(--accent-red)]/20 border border-[var(--accent-red)]/20 transition-colors flex-shrink-0"
-          >
-            <RefreshCw className="w-3 h-3" />
-            Retry
-          </button>
-        </motion.div>
-      )}
-
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -604,127 +709,135 @@ export default function OverviewPage() {
         })}
       </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {/* Sessions Over Time Chart */}
-        <div className="rounded-xl glass gradient-border overflow-hidden">
-          <div className="relative p-5">
-            <div className="relative z-[3]">
-              <h3 className="text-[13px] font-medium mb-4 text-[var(--text-primary)]">Sessions Over Time</h3>
-              <AreaChart
-                data={sessionsChart}
-                color="var(--accent-blue)"
-                gradientId="sessions-area"
-                height={192}
-                formatValue={(v) => v.toLocaleString()}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Failure Rate Trend Chart */}
-        <div className="rounded-xl glass gradient-border overflow-hidden">
-          <div className="relative p-5">
-            <div className="relative z-[3]">
-              <h3 className="text-[13px] font-medium mb-4 text-[var(--text-primary)]">Failure Rate Trend</h3>
-              <LineChart
-                data={failureChart}
-                color="var(--accent-red)"
-                height={192}
-                valueSuffix="%"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Recent Sessions Table */}
-      <div className="rounded-xl glass gradient-border overflow-hidden">
-        <div className="relative">
-          <div className="relative z-[3]">
-            <div className="px-5 py-3.5 border-b border-[var(--border-subtle)]">
-              <div className="flex items-center justify-between">
-                <h3 className="text-[13px] font-medium text-[var(--text-primary)]">Recent Sessions</h3>
-                <Link
-                  href="/dashboard/sessions"
-                  className="text-[11px] text-[var(--accent-blue)] hover:text-[var(--accent-blue)]/80 transition-colors flex items-center gap-1"
-                >
-                  View all
-                  <ArrowRight className="w-3 h-3" />
-                </Link>
+      {/* Charts Row OR Onboarding Card */}
+      {hasNoSessions || !hasChartData ? (
+        <OnboardingCard />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {/* Sessions Over Time Chart */}
+          <div className="rounded-xl glass gradient-border overflow-hidden">
+            <div className="relative p-5">
+              <div className="relative z-[3]">
+                <h3 className="text-[13px] font-medium mb-4 text-[var(--text-primary)]">Sessions Over Time</h3>
+                <AreaChart
+                  data={sessionsChart}
+                  color="var(--accent-blue)"
+                  gradientId="sessions-area"
+                  height={192}
+                  formatValue={(v) => v.toLocaleString()}
+                />
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-[var(--border-subtle)]">
-                    <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                      Session
-                    </th>
-                    <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                      Agent
-                    </th>
-                    <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                      Status
-                    </th>
-                    <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                      Duration
-                    </th>
-                    <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                      Cost
-                    </th>
-                    <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                      Time
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentSessions.map((session, index) => (
-                    <motion.tr
-                      key={session.id}
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.1 + index * 0.03, duration: 0.25 }}
-                      className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer group"
-                    >
-                      <td className="px-5 py-2.5">
-                        <span className="font-mono text-[11px] text-[var(--text-secondary)] group-hover:text-[var(--accent-blue)] transition-colors tabular-nums">
-                          {session.id}
-                        </span>
-                      </td>
-                      <td className="px-5 py-2.5 text-[13px] text-[var(--text-primary)]">{session.agent}</td>
-                      <td className="px-5 py-2.5">
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium capitalize ${statusBadgeClass[session.status] || ""}`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${statusDotClass[session.status] || ""}`}
-                            style={{ backgroundColor: statusColors[session.status] }}
-                          />
-                          {session.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-2.5 text-[12px] text-[var(--text-secondary)] tabular-nums">
-                        {session.duration > 0
-                          ? session.duration < 1000
-                            ? `${session.duration}ms`
-                            : `${(session.duration / 1000).toFixed(1)}s`
-                          : "\u2014"}
-                      </td>
-                      <td className="px-5 py-2.5 text-[12px] text-[var(--text-secondary)] tabular-nums">
-                        ${(session.cost / 100).toFixed(2)}
-                      </td>
-                      <td className="px-5 py-2.5 text-[11px] text-[var(--text-tertiary)]">
-                        {session.time}
-                      </td>
-                    </motion.tr>
-                  ))}
-                </tbody>
-              </table>
+          </div>
+
+          {/* Failure Rate Trend Chart */}
+          <div className="rounded-xl glass gradient-border overflow-hidden">
+            <div className="relative p-5">
+              <div className="relative z-[3]">
+                <h3 className="text-[13px] font-medium mb-4 text-[var(--text-primary)]">Failure Rate Trend</h3>
+                <LineChart
+                  data={failureChart}
+                  color="var(--accent-red)"
+                  height={192}
+                  valueSuffix="%"
+                />
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Recent Sessions Table OR Empty State */}
+      {recentSessions.length === 0 ? (
+        <EmptyRecentSessions />
+      ) : (
+        <div className="rounded-xl glass gradient-border overflow-hidden">
+          <div className="relative">
+            <div className="relative z-[3]">
+              <div className="px-5 py-3.5 border-b border-[var(--border-subtle)]">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[13px] font-medium text-[var(--text-primary)]">Recent Sessions</h3>
+                  <Link
+                    href="/dashboard/sessions"
+                    className="text-[11px] text-[var(--accent-blue)] hover:text-[var(--accent-blue)]/80 transition-colors flex items-center gap-1"
+                  >
+                    View all
+                    <ArrowRight className="w-3 h-3" />
+                  </Link>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-[var(--border-subtle)]">
+                      <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+                        Session
+                      </th>
+                      <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+                        Agent
+                      </th>
+                      <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+                        Status
+                      </th>
+                      <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+                        Duration
+                      </th>
+                      <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+                        Cost
+                      </th>
+                      <th className="text-left px-5 py-2.5 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+                        Time
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentSessions.map((session, index) => (
+                      <motion.tr
+                        key={session.id}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.1 + index * 0.03, duration: 0.25 }}
+                        className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer group"
+                      >
+                        <td className="px-5 py-2.5">
+                          <span className="font-mono text-[11px] text-[var(--text-secondary)] group-hover:text-[var(--accent-blue)] transition-colors tabular-nums">
+                            {session.id}
+                          </span>
+                        </td>
+                        <td className="px-5 py-2.5 text-[13px] text-[var(--text-primary)]">{session.agent}</td>
+                        <td className="px-5 py-2.5">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium capitalize ${statusBadgeClass[session.status] || ""}`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${statusDotClass[session.status] || ""}`}
+                              style={{ backgroundColor: statusColors[session.status] }}
+                            />
+                            {session.status}
+                          </span>
+                        </td>
+                        <td className="px-5 py-2.5 text-[12px] text-[var(--text-secondary)] tabular-nums">
+                          {session.duration > 0
+                            ? session.duration < 1000
+                              ? `${session.duration}ms`
+                              : `${(session.duration / 1000).toFixed(1)}s`
+                            : "\u2014"}
+                        </td>
+                        <td className="px-5 py-2.5 text-[12px] text-[var(--text-secondary)] tabular-nums">
+                          ${(session.cost / 100).toFixed(2)}
+                        </td>
+                        <td className="px-5 py-2.5 text-[11px] text-[var(--text-tertiary)]">
+                          {session.time}
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

@@ -10,7 +10,9 @@ import {
   ChevronRight,
   RefreshCw,
   AlertTriangle,
-  Info,
+  Copy,
+  Check,
+  ExternalLink,
 } from "lucide-react";
 import { fadeIn, staggerContainer, staggerItem } from "@/lib/animations";
 import { SkeletonTable } from "@/components/skeleton";
@@ -64,178 +66,8 @@ function toDisplaySessions(sessions: Session[]): DisplaySession[] {
 }
 
 // ---------------------------------------------------------------------------
-// Mock data — used as fallback when the backend is unavailable
+// Status config
 // ---------------------------------------------------------------------------
-const mockSessions: DisplaySession[] = [
-  {
-    id: "ses_a1b2c3d4",
-    org_id: "org_1",
-    agent_name: "Research Agent",
-    agent_id: "agent_1",
-    status: "completed",
-    input: "Find papers on transformer architectures",
-    output: "Found 12 relevant papers...",
-    error: "",
-    metadata: {},
-    total_tokens: 8420,
-    total_cost_cents: 15,
-    total_spans: 5,
-    duration_ms: 4200,
-    has_healing: false,
-    tags: ["research"],
-    started_at: "2025-03-20T10:00:00Z",
-    ended_at: "2025-03-20T10:00:04Z",
-    created_at: "2025-03-20T10:00:00Z",
-    time_ago: "2 min ago",
-  },
-  {
-    id: "ses_e5f6g7h8",
-    org_id: "org_1",
-    agent_name: "Code Review Agent",
-    agent_id: "agent_2",
-    status: "healed",
-    input: "Review PR #142",
-    output: "Code review completed with healing intervention",
-    error: "",
-    metadata: {},
-    total_tokens: 21500,
-    total_cost_cents: 42,
-    total_spans: 8,
-    duration_ms: 12300,
-    has_healing: true,
-    tags: ["code-review"],
-    started_at: "2025-03-20T09:55:00Z",
-    ended_at: "2025-03-20T09:55:12Z",
-    created_at: "2025-03-20T09:55:00Z",
-    time_ago: "5 min ago",
-  },
-  {
-    id: "ses_i9j0k1l2",
-    org_id: "org_1",
-    agent_name: "Support Agent",
-    agent_id: "agent_3",
-    status: "failed",
-    input: "Handle ticket #8821",
-    output: "",
-    error: "Context window exceeded",
-    metadata: {},
-    total_tokens: 3200,
-    total_cost_cents: 8,
-    total_spans: 3,
-    duration_ms: 1800,
-    has_healing: false,
-    tags: ["support"],
-    started_at: "2025-03-20T09:48:00Z",
-    ended_at: "2025-03-20T09:48:01Z",
-    created_at: "2025-03-20T09:48:00Z",
-    time_ago: "12 min ago",
-  },
-  {
-    id: "ses_m3n4o5p6",
-    org_id: "org_1",
-    agent_name: "Research Agent",
-    agent_id: "agent_1",
-    status: "completed",
-    input: "Summarize Q4 earnings reports",
-    output: "Summary generated successfully",
-    error: "",
-    metadata: {},
-    total_tokens: 6300,
-    total_cost_cents: 12,
-    total_spans: 4,
-    duration_ms: 3100,
-    has_healing: false,
-    tags: ["research"],
-    started_at: "2025-03-20T09:45:00Z",
-    ended_at: "2025-03-20T09:45:03Z",
-    created_at: "2025-03-20T09:45:00Z",
-    time_ago: "15 min ago",
-  },
-  {
-    id: "ses_q7r8s9t0",
-    org_id: "org_1",
-    agent_name: "Data Pipeline Agent",
-    agent_id: "agent_4",
-    status: "running",
-    input: "Process batch ETL job #44",
-    output: "",
-    error: "",
-    metadata: {},
-    total_tokens: 1200,
-    total_cost_cents: 3,
-    total_spans: 2,
-    duration_ms: 0,
-    has_healing: false,
-    tags: ["data"],
-    started_at: "2025-03-20T10:02:00Z",
-    ended_at: "",
-    created_at: "2025-03-20T10:02:00Z",
-    time_ago: "just now",
-  },
-  {
-    id: "ses_u1v2w3x4",
-    org_id: "org_1",
-    agent_name: "Support Agent",
-    agent_id: "agent_3",
-    status: "timeout",
-    input: "Generate weekly report",
-    output: "",
-    error: "Operation timed out after 30s",
-    metadata: {},
-    total_tokens: 4100,
-    total_cost_cents: 9,
-    total_spans: 3,
-    duration_ms: 30000,
-    has_healing: false,
-    tags: ["support"],
-    started_at: "2025-03-20T09:30:00Z",
-    ended_at: "2025-03-20T09:30:30Z",
-    created_at: "2025-03-20T09:30:00Z",
-    time_ago: "30 min ago",
-  },
-  {
-    id: "ses_y5z6a7b8",
-    org_id: "org_1",
-    agent_name: "Code Review Agent",
-    agent_id: "agent_2",
-    status: "completed",
-    input: "Review PR #139",
-    output: "All checks passed",
-    error: "",
-    metadata: {},
-    total_tokens: 15200,
-    total_cost_cents: 31,
-    total_spans: 6,
-    duration_ms: 8400,
-    has_healing: false,
-    tags: ["code-review"],
-    started_at: "2025-03-20T09:20:00Z",
-    ended_at: "2025-03-20T09:20:08Z",
-    created_at: "2025-03-20T09:20:00Z",
-    time_ago: "40 min ago",
-  },
-  {
-    id: "ses_c9d0e1f2",
-    org_id: "org_1",
-    agent_name: "Research Agent",
-    agent_id: "agent_1",
-    status: "healed",
-    input: "Competitive analysis for product X",
-    output: "Analysis complete after loop recovery",
-    error: "",
-    metadata: {},
-    total_tokens: 18700,
-    total_cost_cents: 38,
-    total_spans: 7,
-    duration_ms: 14200,
-    has_healing: true,
-    tags: ["research"],
-    started_at: "2025-03-20T09:10:00Z",
-    ended_at: "2025-03-20T09:10:14Z",
-    created_at: "2025-03-20T09:10:00Z",
-    time_ago: "50 min ago",
-  },
-];
 
 const statusConfig: Record<
   string,
@@ -288,12 +120,112 @@ function formatTokens(tokens: number): string {
   return tokens.toLocaleString();
 }
 
+// ---------------------------------------------------------------------------
+// Copy button helper
+// ---------------------------------------------------------------------------
+
+function CopyButton({ text, label = "Copy Setup Code", className = "" }: { text: string; label?: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [text]);
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+        copied
+          ? "text-[var(--accent-green)] bg-[var(--accent-green)]/10 border border-[var(--accent-green)]/20"
+          : "text-[var(--text-secondary)] bg-[var(--bg-hover)] border border-[var(--border-subtle)] hover:border-[var(--border-default)] hover:text-[var(--text-primary)]"
+      } ${className}`}
+    >
+      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      {copied ? "Copied!" : label}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Empty state component for sessions page
+// ---------------------------------------------------------------------------
+
+const SETUP_CODE = `import agentstack
+agentstack.init(api_key="your-key", endpoint="http://localhost:8080")
+
+with agentstack.session(agent_name="my-agent") as session:
+    # Your agent code here
+    pass`;
+
+function EmptySessionsState() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-10 lg:p-14"
+    >
+      <div className="flex flex-col items-center text-center max-w-lg mx-auto">
+        <div className="w-12 h-12 rounded-xl bg-[var(--accent-blue)]/10 flex items-center justify-center mb-4">
+          <Activity className="w-6 h-6 text-[var(--accent-blue)]" />
+        </div>
+        <h3 className="text-[15px] font-semibold text-[var(--text-primary)] mb-1.5">
+          No sessions recorded
+        </h3>
+        <p className="text-[13px] text-[var(--text-secondary)] mb-6">
+          Start sending trace data from your agents to see sessions here.
+        </p>
+
+        {/* Code snippet */}
+        <div className="w-full rounded-lg bg-[var(--bg-primary)] border border-[var(--border-subtle)] overflow-hidden mb-5">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)]">
+            <span className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+              Python
+            </span>
+            <CopyButton text={SETUP_CODE} label="Copy" />
+          </div>
+          <pre className="px-4 py-3 text-[12px] leading-relaxed font-mono text-[var(--text-secondary)] text-left overflow-x-auto">
+            <code>
+              <span className="text-[var(--accent-purple)]">import</span> agentstack{"\n"}
+              agentstack.<span className="text-[var(--accent-blue)]">init</span>(api_key=<span className="text-[var(--accent-green)]">&quot;your-key&quot;</span>, endpoint=<span className="text-[var(--accent-green)]">&quot;http://localhost:8080&quot;</span>){"\n"}
+              {"\n"}
+              <span className="text-[var(--accent-purple)]">with</span> agentstack.<span className="text-[var(--accent-blue)]">session</span>(agent_name=<span className="text-[var(--accent-green)]">&quot;my-agent&quot;</span>) <span className="text-[var(--accent-purple)]">as</span> session:{"\n"}
+              {"    "}<span className="text-[var(--text-tertiary)]"># Your agent code here</span>{"\n"}
+              {"    "}<span className="text-[var(--accent-purple)]">pass</span>
+            </code>
+          </pre>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-3">
+          <CopyButton text={SETUP_CODE} label="Copy Setup Code" />
+          <a
+            href="https://docs.agentstack.dev"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium text-[var(--accent-blue)] bg-[var(--accent-blue)]/10 border border-[var(--accent-blue)]/20 hover:bg-[var(--accent-blue)]/15 transition-colors"
+          >
+            View Docs
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page component
+// ---------------------------------------------------------------------------
+
 export default function SessionsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<DisplaySession[]>([]);
-  const [usingMockData, setUsingMockData] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
@@ -311,7 +243,6 @@ export default function SessionsPage() {
 
     setLoading(true);
     setFetchError(null);
-    setUsingMockData(false);
 
     try {
       // Ensure the API client has the JWT token from localStorage
@@ -320,16 +251,12 @@ export default function SessionsPage() {
         api.setToken(token);
       }
 
-      // Call the real backend: GET /v1/sessions
-      // The /v1 routes use API key auth. The JWT token stored in localStorage
-      // is set as a Bearer token. If the backend rejects it (no valid API key
-      // session), we gracefully fall back to mock data below.
       const data = await api.get<SessionsAPIResponse>("/v1/sessions?limit=200");
 
       // If the component unmounted or a newer fetch started, bail out
       if (controller.signal.aborted) return;
 
-      const displaySessions = toDisplaySessions(data.sessions);
+      const displaySessions = toDisplaySessions(data.sessions ?? []);
       setSessions(displaySessions);
       setLoading(false);
     } catch (err) {
@@ -343,13 +270,9 @@ export default function SessionsPage() {
             ? err.message
             : "Failed to load sessions";
 
-      console.warn(
-        `[AgentStack] ${new Date().toISOString()} SessionsPage: API fetch failed, falling back to mock data. Reason: ${message}`
-      );
+      console.error("[AgentStack] SessionsPage: API fetch failed:", message);
 
-      // FALLBACK: use mock data so the page still renders during development
-      setSessions(mockSessions);
-      setUsingMockData(true);
+      setFetchError(message);
       setLoading(false);
     }
   }, []);
@@ -384,8 +307,8 @@ export default function SessionsPage() {
     currentPage * pageSize
   );
 
-  const isEmpty = !loading && !fetchError && filtered.length === 0;
   const isEmptyState = !loading && !fetchError && sessions.length === 0;
+  const isNoResults = !loading && !fetchError && sessions.length > 0 && filtered.length === 0;
 
   return (
     <motion.div
@@ -402,24 +325,8 @@ export default function SessionsPage() {
         </p>
       </div>
 
-      {/* Mock data indicator — shown when the API is unreachable and we fell back */}
-      {usingMockData && !loading && (
-        <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-[var(--accent-amber)]/20 bg-[var(--accent-amber)]/5 text-xs text-[var(--accent-amber)]">
-          <Info className="w-3.5 h-3.5 flex-shrink-0" />
-          <span>
-            Showing mock data — the backend API is not reachable.{" "}
-            <button
-              onClick={handleRefresh}
-              className="underline underline-offset-2 hover:text-[var(--text-primary)] transition-colors"
-            >
-              Retry
-            </button>
-          </span>
-        </div>
-      )}
-
-      {/* Search / Filter Bar */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      {/* Search / Filter Bar — shown always, dimmed when empty */}
+      <div className={`flex flex-col sm:flex-row gap-3 ${isEmptyState ? "opacity-50 pointer-events-none" : ""}`}>
         <div className="relative flex-1 flex gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)]" />
@@ -431,6 +338,7 @@ export default function SessionsPage() {
                 setCurrentPage(1);
               }}
               className="pl-10 bg-[var(--bg-elevated)] border-[var(--border-subtle)] text-sm"
+              disabled={isEmptyState}
             />
           </div>
           <motion.button
@@ -438,6 +346,7 @@ export default function SessionsPage() {
             onClick={handleRefresh}
             className="flex items-center justify-center w-9 h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
             title="Refresh"
+            disabled={isEmptyState}
           >
             <RefreshCw
               className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
@@ -456,6 +365,7 @@ export default function SessionsPage() {
                     setStatusFilter(status);
                     setCurrentPage(1);
                   }}
+                  disabled={isEmptyState}
                   className={`px-3 py-1.5 text-xs rounded-lg border transition-all duration-150 capitalize ${
                     isActive
                       ? status === "all"
@@ -505,22 +415,11 @@ export default function SessionsPage() {
         </div>
       )}
 
-      {/* Empty State */}
-      {isEmptyState && (
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-16 text-center">
-          <div className="w-12 h-12 rounded-xl bg-[var(--accent-blue)]/10 flex items-center justify-center mx-auto mb-4">
-            <Activity className="w-6 h-6 text-[var(--accent-blue)]" />
-          </div>
-          <h3 className="text-sm font-medium mb-1">No sessions yet</h3>
-          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto">
-            Start sending traces from your agents using the AgentStack SDK to
-            see sessions here.
-          </p>
-        </div>
-      )}
+      {/* Empty State — no sessions at all */}
+      {isEmptyState && <EmptySessionsState />}
 
-      {/* No Results */}
-      {isEmpty && !isEmptyState && (
+      {/* No Results — sessions exist but filter/search matches nothing */}
+      {isNoResults && (
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-16 text-center">
           <div className="w-12 h-12 rounded-xl bg-[var(--bg-hover)] flex items-center justify-center mx-auto mb-4">
             <Search className="w-6 h-6 text-[var(--text-tertiary)]" />
