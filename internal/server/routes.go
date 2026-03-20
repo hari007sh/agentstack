@@ -168,7 +168,7 @@ func (s *Server) setupRoutes() {
 
 		// --- Build test module dependencies ---
 		testPgStore := teststore.NewPostgresStore(s.db)
-		evalSvc := testservice.NewEvaluatorService(s.logger)
+		evalSvc := testservice.NewEvaluatorService(s.logger, nil)
 		runnerSvc := testservice.NewRunnerService(testPgStore, evalSvc, s.logger)
 
 		suiteHandler := testhandler.NewSuiteHandler(testPgStore, s.logger)
@@ -443,6 +443,14 @@ func (s *Server) setupRoutes() {
 			r.Get("/", s.handleListAPIKeys)
 			r.Post("/", s.handleCreateAPIKey)
 			r.Delete("/{id}", s.handleDeleteAPIKey)
+		})
+
+		// Team management
+		r.Route("/team", func(r chi.Router) {
+			r.Get("/", s.handleListTeam)
+			r.Post("/invite", s.handleInviteTeamMember)
+			r.Patch("/{id}/role", s.handleUpdateTeamMemberRole)
+			r.Delete("/{id}", s.handleRemoveTeamMember)
 		})
 	})
 }
