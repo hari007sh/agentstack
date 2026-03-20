@@ -13,6 +13,7 @@
     --bg-tertiary: #f1f3f5;
     --bg-elevated: #ffffff;
     --bg-hover: #f1f3f5;
+    --bg-sidebar: #f8f9fa;
     --border-subtle: rgba(0, 0, 0, 0.06);
     --border-default: rgba(0, 0, 0, 0.1);
     --text-primary: #111113;
@@ -52,48 +53,50 @@
     --chart-5: 0 84% 60%;
   }
 
-  /* ===== DARK MODE ===== */
+  /* ===== DARK MODE (default) ===== */
   .dark {
-    --bg-primary: #0a0a0b;
-    --bg-secondary: #111113;
-    --bg-tertiary: #18181b;
-    --bg-elevated: #1e1e22;
-    --bg-hover: #27272a;
-    --border-subtle: rgba(255, 255, 255, 0.06);
-    --border-default: rgba(255, 255, 255, 0.1);
-    --text-primary: #fafafa;
-    --text-secondary: #a1a1aa;
-    --text-tertiary: #71717a;
+    --bg-primary: #0a0a0f;
+    --bg-secondary: #12121e;
+    --bg-tertiary: #1a1a2e;
+    --bg-elevated: #1e1e3a;
+    --bg-hover: #24243e;
+    --bg-sidebar: #08080d;
+    --border-subtle: #1e1e3a;
+    --border-default: #2a2a4a;
+    --text-primary: #f0f0f5;
+    --text-secondary: #8888a0;
+    --text-tertiary: #555570;
     --accent-blue: #3b82f6;
     --accent-green: #22c55e;
     --accent-red: #ef4444;
-    --accent-amber: #f59e0b;
-    --accent-purple: #a855f7;
+    --accent-amber: #eab308;
+    --accent-purple: #8b5cf6;
     --healing-blue: #38bdf8;
 
-    --background: 240 6% 4%;
-    --foreground: 0 0% 98%;
-    --card: 240 5% 12%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 5% 12%;
-    --popover-foreground: 0 0% 98%;
+    /* shadcn dark mode vars (HSL without hsl() wrapper) */
+    --background: 240 33% 4%;
+    --foreground: 240 20% 95%;
+    --card: 240 25% 9%;
+    --card-foreground: 240 20% 95%;
+    --popover: 240 25% 9%;
+    --popover-foreground: 240 20% 95%;
     --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 4% 10%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3% 7%;
-    --muted-foreground: 240 5% 65%;
-    --accent: 240 4% 16%;
-    --accent-foreground: 0 0% 98%;
+    --secondary: 240 25% 12%;
+    --secondary-foreground: 240 20% 95%;
+    --muted: 240 25% 9%;
+    --muted-foreground: 240 10% 58%;
+    --accent: 240 25% 16%;
+    --accent-foreground: 240 20% 95%;
     --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 4% 16%;
-    --input: 240 4% 16%;
+    --destructive-foreground: 240 20% 95%;
+    --border: 240 33% 17%;
+    --input: 240 33% 17%;
     --ring: 217 91% 60%;
     --chart-1: 217 91% 60%;
     --chart-2: 142 71% 45%;
-    --chart-3: 270 95% 75%;
-    --chart-4: 38 92% 50%;
+    --chart-3: 262 83% 58%;
+    --chart-4: 48 96% 47%;
     --chart-5: 0 84% 60%;
   }
 
@@ -201,8 +204,8 @@
   border: 1px solid rgba(0, 0, 0, 0.06);
 }
 .dark .glass {
-  background: rgba(30, 30, 34, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(18, 18, 30, 0.7);
+  border: 1px solid var(--border-subtle);
 }
 
 /* Noise texture overlay */
