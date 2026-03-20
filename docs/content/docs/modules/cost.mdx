@@ -1,0 +1,306 @@
+---
+title: Cost (Intelligence)
+description: Cost provides per-session and per-model cost tracking, budget enforcement, model comparison, and spend analytics.
+---
+
+# Cost (Intelligence)
+
+Cost is AgentStack's cost intelligence module. It tracks spending at the session, agent, and model level; enforces budget policies with configurable actions; and provides model comparison analytics to optimize your LLM spend.
+
+## Overview
+
+Cost gives you:
+
+- **Event-level tracking**: Every LLM call is recorded with token counts and cost in integer cents.
+- **Auto-calculation**: If you send token counts without cost, the pricing table computes cost automatically.
+- **Budget policies**: Set spending limits by org, agent, or model with daily/weekly/monthly periods.
+- **Budget enforcement**: When budgets are exceeded, configurable actions trigger (alert, throttle, block).
+- **Model comparison**: Compare cost-per-token and cost-per-outcome across models.
+
+All monetary values are stored as **integer cents** to avoid floating-point precision issues.
+
+## How It Works
+
+### Cost Events
+
+Every LLM call generates a cost event with:
+
+| Field | Description |
+|-------|-------------|
+| `session_id` | Session this call belongs to |
+| `span_id` | Span that triggered this call |
+| `agent_name` | Agent that made the call |
+| `model` | Model used (e.g., `gpt-4o`) |
+| `provider` | Provider name (e.g., `openai`) |
+| `input_tokens` | Number of input/prompt tokens |
+| `output_tokens` | Number of output/completion tokens |
+| `total_tokens` | Sum of input + output (auto-calculated if zero) |
+| `cost_cents` | Cost in integer cents (auto-calculated from pricing if zero) |
+| `outcome` | Optional outcome label for per-outcome cost analysis |
+| `metadata` | Arbitrary JSON metadata |
+
+### Auto-Cost Calculation
+
+When `cost_cents` is zero but token counts are provided, the tracker service looks up the model pricing table and computes cost using integer arithmetic:
+
+```
+input_cost  = (input_tokens  * input_cost_per_1M)  / 1,000,000
+output_cost = (output_tokens * output_cost_per_1M) / 1,000,000
+total_cost  = input_cost + output_cost
+```
+
+All arithmetic uses `int64` to avoid overflow on large token counts. The model pricing table is seeded from `seed/model_pricing.json`.
+
+### Budget Policies
+
+Budget policies define spending limits with three dimensions:
+
+**Scope** -- what the budget applies to:
+
+| Scope | Description |
+|-------|-------------|
+| `org` | Total spending for the entire organization |
+| `agent` | Spending for a specific agent (set `scope_value` to agent name) |
+| `model` | Spending for a specific model (set `scope_value` to model name) |
+
+**Period** -- how often the budget resets:
+
+| Period | Reset Interval |
+|--------|----------------|
+| `daily` | Every 24 hours from period start |
+| `weekly` | Every 7 days from period start |
+| `monthly` | Every calendar month from period start |
+
+**Action** -- what happens when the budget is exceeded:
+
+| Action | Behavior |
+|--------|----------|
+| `alert` | Send a notification (email/webhook) but allow spending to continue |
+| `throttle` | Rate-limit requests but do not hard block |
+| `block` | Hard block all requests that would exceed the budget |
+
+### Budget Enforcement
+
+The budget checker worker runs every 60 seconds and:
+
+1. **Recalculates spend**: Queries `cost_events` to compute actual spend for each budget period. This ensures accuracy even if events arrive out of order.
+2. **Resets expired periods**: Checks if any budget period has ended and resets `current_spend_cents` to zero with a new `period_start`.
+3. **Checks alert thresholds**: If utilization exceeds `alert_threshold_pct` (default: 80%), triggers the configured alert action.
+
+### Budget Check API
+
+The budget service can be called to check whether a specific request is within budget:
+
+```go
+result, err := budgetService.CheckBudget(ctx, orgID, agentName, model)
+// result.Allowed == true/false
+// result.UtilizationPct == current utilization percentage
+// result.Message == human-readable status
+```
+
+## API Reference
+
+### Record Cost Events
+
+```
+POST /v1/cost/events
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+Single event:
+
+```json
+{
+  "session_id": "sess_abc123",
+  "span_id": "span_def456",
+  "agent_name": "customer-support",
+  "model": "gpt-4o",
+  "provider": "openai",
+  "input_tokens": 1200,
+  "output_tokens": 350,
+  "cost_cents": 4,
+  "outcome": "resolved"
+}
+```
+
+Batch events:
+
+```json
+{
+  "events": [
+    {
+      "model": "gpt-4o",
+      "provider": "openai",
+      "input_tokens": 1200,
+      "output_tokens": 350
+    },
+    {
+      "model": "claude-3-5-sonnet-20241022",
+      "provider": "anthropic",
+      "input_tokens": 800,
+      "output_tokens": 200
+    }
+  ]
+}
+```
+
+**Validation**: `model` and `provider` are required. Maximum 1000 events per batch. If `cost_cents` is 0 and tokens are provided, cost is auto-calculated from the pricing table.
+
+Response (`201 Created`): the recorded event(s).
+
+### List Cost Events
+
+```
+GET /v1/cost/events?model=gpt-4o&from=2025-01-01T00:00:00Z&to=2025-01-31T23:59:59Z&limit=50
+Authorization: Bearer as_sk_your_key
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `agent_name` | -- | Filter by agent |
+| `model` | -- | Filter by model |
+| `provider` | -- | Filter by provider |
+| `outcome` | -- | Filter by outcome label |
+| `from` | -- | Start date (RFC3339) |
+| `to` | -- | End date (RFC3339) |
+| `limit` | 50 | Results per page (max 1000) |
+| `offset` | 0 | Pagination offset |
+
+### Cost Analytics Summary
+
+```
+GET /v1/cost/analytics/summary?from=2025-01-01T00:00:00Z&to=2025-01-31T23:59:59Z
+Authorization: Bearer as_sk_your_key
+```
+
+Returns total spend, average cost per session, total tokens, and cost trends.
+
+### Cost By Model
+
+```
+GET /v1/cost/analytics/by-model?from=...&to=...
+Authorization: Bearer as_sk_your_key
+```
+
+Returns cost breakdown per model.
+
+### Cost By Agent
+
+```
+GET /v1/cost/analytics/by-agent?from=...&to=...
+Authorization: Bearer as_sk_your_key
+```
+
+Returns cost breakdown per agent.
+
+### Top Spenders
+
+```
+GET /v1/cost/analytics/top-spenders?from=...&to=...&limit=10
+Authorization: Bearer as_sk_your_key
+```
+
+Returns the highest-spending sessions/agents.
+
+### Compare Models
+
+```
+GET /v1/cost/analytics/compare?from=...&to=...
+Authorization: Bearer as_sk_your_key
+```
+
+Returns side-by-side cost and token comparisons across all models used.
+
+### Create Budget
+
+```
+POST /v1/cost/budgets
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "Monthly org budget",
+  "description": "Total org spend limit",
+  "scope": "org",
+  "limit_cents": 100000,
+  "period": "monthly",
+  "action": "alert",
+  "alert_threshold_pct": 80,
+  "enabled": true
+}
+```
+
+| Field | Required | Valid Values |
+|-------|----------|-------------|
+| `name` | Yes | Any string |
+| `limit_cents` | Yes | Positive integer (e.g., 100000 = $1,000.00) |
+| `scope` | No (default: `org`) | `org`, `agent`, `model` |
+| `scope_value` | No | Agent name or model name (required when scope is `agent` or `model`) |
+| `period` | No (default: `monthly`) | `daily`, `weekly`, `monthly` |
+| `action` | No (default: `alert`) | `alert`, `throttle`, `block` |
+| `alert_threshold_pct` | No (default: `80`) | 1-100 |
+| `enabled` | No (default: `true`) | Boolean |
+
+Response (`201 Created`): the created budget object.
+
+### List Budgets
+
+```
+GET /v1/cost/budgets
+Authorization: Bearer as_sk_your_key
+```
+
+Response includes `utilization_pct` computed as `(current_spend_cents * 100) / limit_cents`.
+
+### Get Budget
+
+```
+GET /v1/cost/budgets/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+### Update Budget
+
+```
+PUT /v1/cost/budgets/{id}
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+### Delete Budget
+
+```
+DELETE /v1/cost/budgets/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+## Dashboard Guide
+
+### Cost Overview (`/dashboard/cost`)
+
+Displays:
+- **Metric cards**: Total spend, average cost per session, cost per outcome, budget utilization.
+- **Spend over time**: Area chart of daily/weekly spending.
+- **Cost by model**: Bar chart comparing spend across models.
+- **Cost by agent**: Bar chart comparing spend across agents.
+
+### Model Comparison (`/dashboard/cost/compare`)
+
+Side-by-side comparison of models showing:
+- Cost per 1K input tokens
+- Cost per 1K output tokens
+- Average latency
+- Usage volume
+- What-if calculator: estimate cost if you switched models
+
+### Budget Policies (`/dashboard/cost/budgets`)
+
+Lists all budget policies with progress bars showing utilization. Each budget shows:
+- Current spend vs. limit
+- Utilization percentage
+- Period (daily/weekly/monthly)
+- Action (alert/throttle/block)
+- Alert history

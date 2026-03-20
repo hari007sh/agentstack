@@ -1,0 +1,252 @@
+---
+title: Architecture
+description: System architecture overview of AgentStack — components, data flow, infrastructure, and authentication model.
+---
+
+# Architecture
+
+AgentStack is composed of four application components backed by four infrastructure services. This page describes how they connect, how data flows through the system, and how authentication works.
+
+## High-Level Diagram
+
+```
+┌────────────────────────────────────────────────────────┐
+│                    AgentStack SDK                       │
+│          (Python + TypeScript — pip/npm install)        │
+│                                                        │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐            │
+│   │  Shield   │  │  Trace   │  │  Guard   │            │
+│   │(healing)  │  │(spans)   │  │(checks)  │            │
+│   └────┬─────┘  └────┬─────┘  └────┬─────┘            │
+└────────┼──────────────┼──────────────┼─────────────────┘
+         │              │              │
+         ▼              ▼              ▼
+┌────────────────────────────────────────────────────────┐
+│              AgentStack API Server (Go)                 │
+│                   Port 8080                             │
+│                                                        │
+│   /v1/ingest/*     → Trace module (sessions, spans)    │
+│   /v1/ingest/healing → Shield module (healing events)  │
+│   /v1/sessions/*   → Trace module (query)              │
+│   /v1/analytics/*  → Trace + Cost analytics            │
+│   /v1/test/*       → Test module (suites, runs, evals) │
+│   /v1/guard/*      → Guard module (rules, checks)      │
+│   /v1/cost/*       → Cost module (events, budgets)     │
+│   /v1/gateway/*    → Route module (management)         │
+│   /v1/patterns/*   → Trace module (failure patterns)   │
+│   /v1/alerts/*     → Trace module (alert rules)        │
+└───────────┬───────────────────────────────┬────────────┘
+            │                               │
+    ┌───────▼───────┐              ┌────────▼────────┐
+    │  PostgreSQL    │              │   ClickHouse    │
+    │  Port 5432     │              │   Port 9000     │
+    │                │              │                 │
+    │ - users        │              │ - sessions      │
+    │ - orgs         │              │ - spans         │
+    │ - api_keys     │              │ - events        │
+    │ - agents       │              │ - healing_events│
+    │ - alert_rules  │              │ - gateway_reqs  │
+    │ - patterns     │              │                 │
+    │ - test_suites  │              └─────────────────┘
+    │ - guardrails   │
+    │ - providers    │        ┌─────────────────┐
+    │ - routes       │        │     Redis        │
+    │ - budgets      │        │   Port 6379      │
+    │ - cost_events  │        │                  │
+    │ - model_pricing│        │ - rate limiting   │
+    └───────────────┘        │ - semantic cache   │
+                              │ - session store   │
+┌─────────────────────┐      └─────────────────┘
+│  Gateway Proxy (Go)  │
+│    Port 8090         │      ┌─────────────────┐
+│                      │      │      NATS        │
+│  OpenAI-compatible   │      │   Port 4222      │
+│  /v1/chat/completions│      │                  │
+│  /v1/embeddings      │      │ - event pipeline │
+│                      │      │ - async ingest   │
+│  Applies: Route +    │      └─────────────────┘
+│  Guard + Cache       │
+└──────────────────────┘      ┌─────────────────┐
+                              │   Next.js        │
+                              │   Port 3000      │
+                              │                  │
+                              │  Unified         │
+                              │  Dashboard       │
+                              └─────────────────┘
+```
+
+## Application Components
+
+### API Server (Go, port 8080)
+
+The unified REST API server handles all module endpoints. Built with Go 1.22+ and the [go-chi/chi](https://github.com/go-chi/chi) router. The server binary is at `cmd/server/main.go`.
+
+On startup, it connects to all four infrastructure services (PostgreSQL, ClickHouse, Redis, NATS), initializes module handlers, and registers routes. Middleware includes request logging (structured JSON via `log/slog`), CORS, rate limiting (Redis sliding window), request ID propagation, and a 30-second timeout.
+
+```go
+// cmd/server/main.go — initialization sequence
+cfg, _ := config.Load()
+db, _ := sql.Open("pgx", cfg.DatabaseURL)          // PostgreSQL
+chDB, _ := sql.Open("clickhouse", cfg.ClickhouseURL) // ClickHouse
+redisClient := redis.NewClient(opt)                   // Redis
+natsConn, _ := nats.Connect(cfg.NatsURL)              // NATS
+
+srv := server.New(cfg, db, redisClient, natsConn, server.WithClickHouse(chDB))
+srv.Run()
+```
+
+The server degrades gracefully: if ClickHouse is unavailable, session/analytics queries return errors but ingestion still works (events queue in NATS). If Redis is unavailable, rate limiting is disabled. If NATS is unavailable, ingestion falls back to synchronous writes.
+
+### Gateway Proxy (Go, port 8090)
+
+A separate Go binary (`cmd/gateway/main.go`) that acts as an OpenAI-compatible proxy. It exposes:
+
+- `POST /v1/chat/completions` — chat completions with routing, caching, and guard checks
+- `POST /v1/embeddings` — embedding requests with routing
+
+The proxy adds less than 5ms overhead. It uses an in-memory route/provider cache that refreshes every 30 seconds. Provider API keys are stored encrypted (AES-256-GCM) in PostgreSQL and decrypted at runtime.
+
+### Worker (Go)
+
+Background worker binary (`cmd/worker/main.go`) that consumes from NATS and handles:
+
+| Worker | NATS Subject | Purpose |
+|--------|-------------|---------|
+| Ingest Writer | `trace.ingest.session`, `trace.ingest.span`, `trace.ingest.event`, `trace.ingest.healing` | Batch-writes to ClickHouse |
+| Pattern Matcher | — | Matches sessions against failure patterns |
+| Alert Evaluator | — | Checks alert rules and sends notifications |
+| Test Executor | `test.run.execute` | Runs test suites asynchronously |
+| Budget Checker | — | Recalculates spend and resets expired periods (every 60s) |
+| Cache Cleanup | — | Expires stale semantic cache entries |
+
+### Dashboard (Next.js, port 3000)
+
+The unified web UI built with Next.js 14+ (App Router), Tailwind CSS, shadcn/ui, and Framer Motion. All six modules share a single sidebar navigation. The dashboard communicates with the API server on port 8080 via REST.
+
+## Data Flow
+
+### 1. SDK to API Server
+
+SDKs (Python and TypeScript) send data to the API server on port 8080:
+
+- **Trace spans** via `POST /v1/ingest/spans`
+- **Sessions** via `POST /v1/ingest/sessions`
+- **Healing events** via `POST /v1/ingest/healing`
+- **Guard checks** via `POST /v1/guard/check`
+- **Cost events** via `POST /v1/cost/events`
+- **Batch data** via `POST /v1/ingest/batch`
+
+All ingestion endpoints return `202 Accepted` immediately.
+
+### 2. API Server to NATS
+
+High-volume ingestion data is published to NATS subjects for async processing. The API response is never blocked on ClickHouse writes:
+
+```
+trace.ingest.session  → session data
+trace.ingest.span     → span data
+trace.ingest.event    → event data
+trace.ingest.healing  → healing events
+test.run.execute      → test run execution requests
+```
+
+### 3. NATS to Workers to ClickHouse
+
+Background workers subscribe to NATS subjects and batch-write to ClickHouse. ClickHouse is append-only — rows are never updated.
+
+### 4. API Server to PostgreSQL
+
+Configuration and CRUD data goes directly to PostgreSQL:
+
+- Users, organizations, API keys
+- Test suites, cases, evaluators, runs
+- Guard rules and events
+- Routes, providers, fallback chains
+- Budgets, cost events, model pricing
+- Alert rules, failure patterns
+
+### 5. API Server to Redis
+
+- **Rate limiting**: sliding window algorithm per API key
+- **Session cache**: temporary session state
+- **Semantic cache**: SHA-256 exact-match cache for gateway responses
+
+### 6. Gateway Proxy Pipeline
+
+When a request hits the gateway proxy:
+
+1. Authenticate via `X-AgentStack-Org-ID` header
+2. Check semantic cache (Redis fast path, PostgreSQL slow path)
+3. Match routing rules (glob pattern on model name)
+4. Select provider via strategy (priority, round_robin, or cost)
+5. Forward request to provider
+6. Store response in cache
+7. Log request asynchronously via NATS
+
+### 7. Dashboard to API Server
+
+The Next.js dashboard reads from all API endpoints to display data across all six modules.
+
+## Infrastructure
+
+| Service | Image | Port | Purpose |
+|---------|-------|------|---------|
+| PostgreSQL | `postgres:16` | 5432 | Relational storage for config, users, CRUD data |
+| ClickHouse | `clickhouse/clickhouse-server:latest` | 9000 (native), 8123 (HTTP) | Columnar time-series storage for sessions, spans, events |
+| Redis | `redis:7-alpine` | 6379 | Rate limiting, semantic cache, session store |
+| NATS | `nats:latest` | 4222 (client), 8222 (monitoring) | Event streaming with JetStream for durable async ingestion |
+
+## Authentication Model
+
+AgentStack uses three authentication mechanisms:
+
+### API Keys (SDK Authentication)
+
+SDKs authenticate with API keys prefixed `as_sk_`. Keys are SHA-256 hashed before storage. On each request, the middleware hashes the provided key and looks it up in the `api_keys` table, resolving the associated `org_id`. The `last_used_at` timestamp is updated asynchronously.
+
+```bash
+curl -H "Authorization: Bearer as_sk_your_key_here" \
+  http://localhost:8080/v1/sessions
+```
+
+### JWT (Dashboard Authentication)
+
+The dashboard uses JWT tokens issued after GitHub OAuth login. Tokens are created by `auth.JWTManager` using the `JWT_SECRET` environment variable and verified on every dashboard API request.
+
+### DualAuth (Both)
+
+Some endpoints accept either authentication method. The middleware checks for a `Bearer` token first — if it starts with `as_sk_`, it is treated as an API key; otherwise, it is decoded as a JWT.
+
+## Project Structure
+
+```
+agentstack/
+├── cmd/
+│   ├── server/main.go      # API server (port 8080)
+│   ├── gateway/main.go      # Gateway proxy (port 8090)
+│   ├── worker/main.go       # Background workers
+│   ├── migrate/main.go      # Database migrations
+│   └── cli/main.go          # CLI tool
+├── internal/
+│   ├── config/              # Environment-based configuration
+│   ├── auth/                # JWT, API keys, GitHub OAuth
+│   ├── model/               # Shared data models
+│   ├── server/              # HTTP server, routes, middleware
+│   ├── trace/               # Trace module
+│   ├── shield/              # Shield module
+│   ├── test/                # Test module
+│   ├── guard/               # Guard module
+│   ├── route/               # Route module
+│   ├── cost/                # Cost module
+│   └── worker/              # Background workers
+├── migrations/
+│   ├── postgres/            # 6 migration pairs (up/down)
+│   └── clickhouse/          # 2 migration pairs (up/down)
+├── sdk/
+│   ├── python/              # Python SDK (pip install agentstack)
+│   └── typescript/          # TypeScript SDK (npm install agentstack)
+├── web/                     # Next.js dashboard
+├── cli/                     # CLI source
+├── seed/                    # Seed data (patterns, evaluators, pricing)
+└── deploy/                  # Dockerfiles and production compose
+```

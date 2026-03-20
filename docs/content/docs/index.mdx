@@ -1,34 +1,92 @@
 ---
-title: Welcome to AgentStack
-description: The platform for building, deploying, and managing AI agents at scale.
+title: "Welcome to AgentStack"
+description: "The open-source platform for AI agents in production — tracing, self-healing, guardrails, testing, routing, and cost intelligence."
 ---
 
-## Introduction
+## What is AgentStack?
 
-AgentStack is a comprehensive platform for building, deploying, and managing AI agents. This documentation covers everything you need to get started and make the most of AgentStack.
+AgentStack is an open-source AI agent production platform that replaces 5-6 separate tools with one unified system. It provides everything you need to build, monitor, and operate AI agents reliably in production.
+
+### Six Modules
+
+- **Shield** -- Self-healing SDK that auto-fixes loops, hallucinations, cost overruns, and timeouts. This is the unique differentiator no other platform offers.
+- **Trace** -- Observability with session replay, distributed tracing, failure pattern detection, and alerting.
+- **Test** -- Evaluation framework with 15+ evaluators, CI/CD quality gates, and regression testing.
+- **Guard** -- Guardrails for PII detection, toxicity filtering, prompt injection detection, and custom policies.
+- **Route** -- Gateway with model routing, provider failover, semantic caching, and load balancing.
+- **Cost** -- Cost intelligence with per-outcome tracking, budget enforcement, and model comparison.
 
 ## Quick Start
 
-Get up and running with AgentStack in minutes:
+Get up and running in under 10 minutes:
 
-1. **Create an account** -- Sign up at the AgentStack dashboard
-2. **Create your first agent** -- Use the CLI or dashboard to scaffold a new agent
-3. **Deploy** -- Push your agent to production with a single command
+```bash
+git clone https://github.com/agentstack/agentstack.git
+cd agentstack
+docker compose up -d
+make migrate && make seed
+make dev          # API server on :8080
+cd web && npm run dev  # Dashboard on :3000
+```
 
-## Key Concepts
+```python
+pip install agentstack
 
-### Agents
+import agentstack
 
-Agents are autonomous AI programs that can reason, plan, and take actions to accomplish tasks. AgentStack provides the infrastructure to build and run them reliably.
+agentstack.init(api_key="as_sk_...", endpoint="http://localhost:8080")
 
-### Stacks
+with agentstack.session(agent_name="my-agent") as session:
+    with session.span("llm-call", span_type="llm_call") as span:
+        span.set_input({"prompt": "Hello"})
+        span.set_output("Hi there!")
+        span.set_tokens(50, 20)
+```
 
-A stack is a pre-configured combination of tools, models, and frameworks that your agent uses. AgentStack supports multiple stack configurations out of the box.
+Read the full [Getting Started](/docs/getting-started) guide for detailed setup instructions.
 
-### Deployments
+## Documentation
 
-AgentStack handles the full lifecycle of your agents -- from local development to production deployment with monitoring and observability built in.
+### Setup
 
-## Next Steps
+- [Getting Started](/docs/getting-started) -- Prerequisites, installation, first trace, and dashboard walkthrough.
 
-Explore the documentation to learn more about each feature and capability of AgentStack.
+### SDKs
+
+- [Python SDK](/docs/python-sdk) -- Sessions, spans, `@trace` decorator, auto-instrumentation (OpenAI, Anthropic, LangChain), Shield self-healing, guard checks, and cost tracking.
+- [TypeScript SDK](/docs/typescript-sdk) -- Sessions, spans, `trace()` wrapper, auto-instrumentation (OpenAI, Anthropic), Shield self-healing, and type-safe API.
+
+### Reference
+
+- [API Reference](/docs/api-reference) -- Complete REST API documentation covering all endpoint groups: ingestion, sessions, analytics, test suites, guard checks, cost events, gateway management, datasets, prompts, webhooks, and the dashboard API.
+
+## Architecture
+
+```
+SDK (Python / TypeScript)
+    |
+    v
+API Server (Go, :8080)  -->  NATS  -->  Workers  -->  ClickHouse
+    |                                                    (time-series)
+    v
+PostgreSQL (config, users, test suites, guard rules, budgets)
+    |
+Redis (rate limiting, cache, sessions)
+    |
+Gateway Proxy (Go, :8090)  -->  OpenAI / Anthropic / Google / ...
+    |
+Dashboard (Next.js, :3000)
+```
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Backend API | Go 1.22+ with chi router |
+| Gateway Proxy | Go (separate binary, under 5ms overhead) |
+| Dashboard | Next.js 14+ with App Router, Tailwind CSS, shadcn/ui |
+| Time-series DB | ClickHouse (spans, events, healing events) |
+| Config DB | PostgreSQL 16+ (users, orgs, test suites, guard rules) |
+| Cache | Redis 7+ (rate limiting, semantic cache, sessions) |
+| Event Streaming | NATS with JetStream (async ingestion pipeline) |
+| SDKs | Python 3.9+ / TypeScript (Node.js 18+) |

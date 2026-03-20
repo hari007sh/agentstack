@@ -1,0 +1,481 @@
+---
+title: "TypeScript SDK"
+description: "Complete reference for the AgentStack TypeScript SDK — tracing, self-healing, and observability for Node.js AI agents."
+---
+
+## Installation
+
+```bash
+npm install @agentstack/sdk
+```
+
+The SDK requires Node.js 18+ and has zero runtime dependencies (uses the built-in `fetch` API and `crypto` module).
+
+## Initialization
+
+Call `init()` once at application startup:
+
+```typescript
+import { init } from '@agentstack/sdk';
+
+init({
+  apiKey: process.env.AGENTSTACK_API_KEY!,
+  projectId: 'my-project',
+  endpoint: 'http://localhost:8080',  // default: https://api.agentstack.dev
+  batchSize: 50,                      // default: 50
+  flushIntervalMs: 5000,              // default: 5000
+  debug: false,
+});
+```
+
+### InitConfig
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `apiKey` | `string` | *required* | Your AgentStack API key |
+| `projectId` | `string` | *required* | Your project identifier |
+| `endpoint` | `string` | `https://api.agentstack.dev` | API server base URL |
+| `batchSize` | `number` | `50` | Events per batch flush |
+| `flushIntervalMs` | `number` | `5000` | Milliseconds between flushes |
+| `maxRetries` | `number` | `3` | Max retry attempts on failure |
+| `healing` | `HealingConfig` | `undefined` | Global Shield configuration |
+| `debug` | `boolean` | `false` | Enable debug logging |
+
+## Sessions
+
+Sessions group related spans and events together. Each user interaction or agent run should be wrapped in a session.
+
+### Creating a Session
+
+```typescript
+import { session, SessionStatus, SpanType } from '@agentstack/sdk';
+
+const sess = session({
+  metadata: { agentName: 'my-agent', userId: 'user-123' },
+});
+
+const span = sess.createSpan('processQuery', SpanType.LLM);
+span.setInput({ prompt: 'Hello' });
+span.setModel('gpt-4o');
+// ... do work ...
+span.setOutput({ response: 'Hi there!' });
+span.setTokens(50, 20);
+span.end();
+
+sess.end();  // or sess.end(SessionStatus.FAILED)
+```
+
+### SessionConfig
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `metadata` | `Record<string, unknown>` | Session metadata. Use `agentName` for the agent name, `tags` for string array tags |
+| `healing` | `HealingConfig` | Per-session Shield configuration (overrides global) |
+
+### Session Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `createSpan` | `(name, type?, parentSpanId?, metadata?) => SpanInstance` | Create a new span |
+| `endSpan` | `(spanId: string) => Span \| undefined` | End a specific span by ID |
+| `end` | `(status?: SessionStatus) => Session` | End the session |
+| `addEvent` | `(type: string, data: Record, spanId?: string) => void` | Add a custom event |
+
+### Session Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | `string` | UUID of the session |
+| `status` | `SessionStatus` | `active`, `completed`, `failed`, or `timeout` |
+| `projectId` | `string` | Project this session belongs to |
+
+### The `protect` Helper
+
+For a cleaner pattern, use `protect()` which creates a session, runs your function, and ends the session:
+
+```typescript
+import { protect } from '@agentstack/sdk';
+
+const result = await protect(
+  { metadata: { agentName: 'summarizer' } },
+  async (sess) => {
+    const span = sess.createSpan('summarize', SpanType.LLM);
+    span.setModel('gpt-4o');
+
+    const response = await callLLM('Summarize this article...');
+
+    span.setOutput(response);
+    span.end();
+    return response;
+  },
+);
+```
+
+## Spans
+
+Spans track individual operations within a session.
+
+### SpanType Enum
+
+```typescript
+import { SpanType } from '@agentstack/sdk';
+
+SpanType.LLM        // 'llm_call'
+SpanType.TOOL       // 'tool_call'
+SpanType.RETRIEVAL  // 'retrieval'
+SpanType.CHAIN      // 'chain'
+SpanType.AGENT      // 'agent'
+SpanType.CUSTOM     // 'custom'
+```
+
+### Span Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `setInput` | `(input: unknown) => SpanInstance` | Set input data |
+| `setOutput` | `(output: unknown) => SpanInstance` | Set output data |
+| `setError` | `(error: Error \| string) => SpanInstance` | Record an error |
+| `setTokens` | `(prompt: number, completion: number) => SpanInstance` | Set token usage |
+| `setModel` | `(model: string) => SpanInstance` | Set the model name |
+| `setMetadata` | `(metadata: Record) => SpanInstance` | Merge metadata |
+| `createChildSpan` | `(name, type?, metadata?) => SpanInstance` | Create a nested child span |
+| `end` | `() => Span` | End the span and send data |
+
+### Span Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | `string` | UUID of the span |
+| `sessionId` | `string` | Parent session ID |
+| `name` | `string` | Span name |
+| `type` | `SpanType` | Span type |
+| `status` | `SpanStatus` | `running`, `completed`, or `error` |
+| `durationMs` | `number \| undefined` | Duration in milliseconds (after `end()`) |
+| `parentSpanId` | `string \| undefined` | Parent span for nesting |
+
+### Nested Spans
+
+```typescript
+const agentSpan = sess.createSpan('agent-run', SpanType.AGENT);
+
+const planSpan = agentSpan.createChildSpan('plan', SpanType.LLM);
+planSpan.setModel('gpt-4o');
+planSpan.setOutput('Step 1: Search. Step 2: Summarize.');
+planSpan.end();
+
+const searchSpan = agentSpan.createChildSpan('search', SpanType.TOOL);
+searchSpan.setInput({ query: 'latest news' });
+searchSpan.setOutput({ results: ['...'] });
+searchSpan.end();
+
+agentSpan.end();
+```
+
+## The `trace` Function
+
+The `trace` function wraps an async operation with automatic span creation:
+
+```typescript
+import { trace, SpanType } from '@agentstack/sdk';
+
+const result = await trace(
+  'generateResponse',
+  { type: SpanType.LLM, metadata: { model: 'gpt-4o' } },
+  async (span) => {
+    span.setModel('gpt-4o');
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 'Hello' }],
+    });
+    return response.choices[0].message.content;
+  },
+);
+```
+
+### TraceOptions
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `name` | `string` | First argument | Override the span name |
+| `type` | `SpanType` | `CUSTOM` | Span type |
+| `parentSpanId` | `string` | `undefined` | Parent span for nesting |
+| `captureInput` | `boolean` | `true` | Capture function input |
+| `captureOutput` | `boolean` | `true` | Capture function return value |
+| `metadata` | `Record` | `undefined` | Metadata for the span |
+
+## Auto-Instrumentation
+
+### OpenAI
+
+Wrap your OpenAI client with `instrumentOpenAI` to auto-create spans:
+
+```typescript
+import OpenAI from 'openai';
+import { init, session, instrumentOpenAI, SpanType } from '@agentstack/sdk';
+
+init({ apiKey: 'as_sk_...', projectId: 'my-project' });
+
+const openai = instrumentOpenAI(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
+
+const sess = session({ metadata: { agentName: 'chatbot' } });
+
+// This call automatically creates a span with model, tokens, and output
+const response = await openai.chat.completions.create({
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: 'Explain quantum computing' }],
+});
+
+sess.end();
+```
+
+The instrumented client wraps:
+- `chat.completions.create` -- captures model, tokens, response content
+- `embeddings.create` -- captures model and token usage
+
+### Anthropic
+
+```typescript
+import Anthropic from '@anthropic-ai/sdk';
+import { init, session, instrumentAnthropic } from '@agentstack/sdk';
+
+init({ apiKey: 'as_sk_...', projectId: 'my-project' });
+
+const anthropic = instrumentAnthropic(new Anthropic());
+
+const sess = session({ metadata: { agentName: 'assistant' } });
+
+const response = await anthropic.messages.create({
+  model: 'claude-sonnet-4-20250514',
+  max_tokens: 1024,
+  messages: [{ role: 'user', content: 'Write a haiku' }],
+});
+
+sess.end();
+```
+
+## Shield (Self-Healing)
+
+Enable Shield globally during initialization or per-session:
+
+```typescript
+import { init, HealingEngine } from '@agentstack/sdk';
+
+init({
+  apiKey: 'as_sk_...',
+  projectId: 'my-project',
+  healing: {
+    enabled: true,
+    loopDetection: {
+      enabled: true,
+      maxRepeats: 3,
+      windowSize: 10,
+    },
+    costBreaker: {
+      enabled: true,
+      maxCostPerSession: 10.0,
+      maxCostPerSpan: 2.0,
+    },
+    hallucinationCatch: {
+      enabled: true,
+      confidenceThreshold: 0.7,
+    },
+    timeoutRecovery: {
+      enabled: true,
+      maxDurationMs: 30000,
+    },
+    contextOverflow: {
+      enabled: true,
+      maxTokens: 128000,
+      strategy: 'truncate',  // 'truncate' | 'summarize' | 'fail'
+    },
+  },
+});
+```
+
+### HealingConfig
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `enabled` | `boolean` | Master switch for Shield |
+| `loopDetection` | `object` | `maxRepeats` and `windowSize` |
+| `costBreaker` | `object` | `maxCostPerSession` and `maxCostPerSpan` (in dollars) |
+| `hallucinationCatch` | `object` | `confidenceThreshold` (0.0 - 1.0) |
+| `timeoutRecovery` | `object` | `maxDurationMs` |
+| `contextOverflow` | `object` | `maxTokens` and `strategy` |
+
+### Using HealingEngine Directly
+
+```typescript
+import { HealingEngine } from '@agentstack/sdk';
+
+const engine = new HealingEngine({
+  enabled: true,
+  loopDetection: { enabled: true, maxRepeats: 3, windowSize: 10 },
+});
+
+// Check for loops
+const loopEvent = engine.checkLoop(outputText, sessionId);
+if (loopEvent) {
+  console.log('Loop detected:', loopEvent.intervention.description);
+}
+
+// Check cost limits
+const costEvent = engine.checkCost(0.05, sessionId, spanId);
+
+// Check for hallucinations
+const hallEvent = engine.checkHallucination(0.4, sessionId, spanId);
+
+// Check timeout
+const timeoutEvent = engine.checkTimeout(45000, sessionId, spanId);
+
+// Check context overflow
+const ctxEvent = engine.checkContextOverflow(150000, sessionId, spanId);
+```
+
+### Intervention Actions
+
+Each healing event includes an `intervention` with:
+
+| Action | Description |
+|--------|-------------|
+| `modify_input` | Modifies the next input to break the failure |
+| `retry` | Retries the operation with modified parameters |
+| `fallback` | Uses a cached or default response |
+| `abort` | Stops the operation |
+| `notify` | Logs the issue without stopping |
+
+## Guard Checks
+
+```typescript
+import { runGuards, checkGuard } from '@agentstack/sdk';
+import type { GuardRule, GuardResult } from '@agentstack/sdk';
+
+const rules: GuardRule[] = [
+  { name: 'pii-detector', enabled: true, action: 'block' },
+  { name: 'toxicity-filter', enabled: true, action: 'warn' },
+];
+
+const result: GuardResult = runGuards('User input text', rules);
+
+if (!result.passed) {
+  for (const violation of result.violations) {
+    console.log(`${violation.rule}: ${violation.message} [${violation.severity}]`);
+  }
+}
+```
+
+## Cost Estimation
+
+```typescript
+import { estimateCost, registerModelPricing } from '@agentstack/sdk';
+
+// Estimate cost for a completion
+const estimate = estimateCost('gpt-4', 1000, 500);
+console.log(`Total cost: $${estimate.totalCost.toFixed(4)}`);
+
+// Register custom model pricing
+registerModelPricing({
+  model: 'my-custom-model',
+  promptPricePerToken: 0.00001,
+  completionPricePerToken: 0.00003,
+});
+```
+
+## Shutdown
+
+Always shut down the SDK gracefully to flush pending events:
+
+```typescript
+import { shutdown } from '@agentstack/sdk';
+
+// Flushes all pending events and cleans up resources
+await shutdown();
+```
+
+The flush timer uses `unref()` so it does not prevent the Node.js process from exiting naturally.
+
+## Complete Example
+
+```typescript
+import OpenAI from 'openai';
+import {
+  init,
+  session,
+  protect,
+  instrumentOpenAI,
+  shutdown,
+  SpanType,
+  SessionStatus,
+} from '@agentstack/sdk';
+
+// Initialize with Shield enabled
+init({
+  apiKey: process.env.AGENTSTACK_API_KEY!,
+  projectId: 'research-agent',
+  endpoint: 'http://localhost:8080',
+  healing: {
+    enabled: true,
+    loopDetection: { enabled: true, maxRepeats: 3, windowSize: 10 },
+    costBreaker: { enabled: true, maxCostPerSession: 5.0, maxCostPerSpan: 1.0 },
+  },
+});
+
+// Instrument OpenAI
+const openai = instrumentOpenAI(new OpenAI());
+
+async function main() {
+  const result = await protect(
+    { metadata: { agentName: 'research-assistant', userId: 'user-789' } },
+    async (sess) => {
+      // Auto-instrumented OpenAI call
+      const response = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          { role: 'system', content: 'You are a research assistant.' },
+          { role: 'user', content: 'Summarize recent AI agent frameworks.' },
+        ],
+      });
+
+      // Manual tool call span
+      const saveSpan = sess.createSpan('save-result', SpanType.TOOL);
+      saveSpan.setInput({ content: response.choices[0].message.content });
+      await saveToDatabase(response.choices[0].message.content!);
+      saveSpan.setOutput({ status: 'saved' });
+      saveSpan.end();
+
+      return response.choices[0].message.content;
+    },
+  );
+
+  console.log('Result:', result);
+  await shutdown();
+}
+
+main().catch(console.error);
+```
+
+## Type Exports
+
+The SDK exports all types for TypeScript usage:
+
+```typescript
+import type {
+  Session,
+  Span,
+  SpanError,
+  TokenUsage,
+  Event,
+  HealingEvent,
+  HealingType,
+  HealingConfig,
+  HealingIntervention,
+  InitConfig,
+  SessionConfig,
+  TraceOptions,
+  GuardRule,
+  GuardResult,
+  GuardViolation,
+  ModelPricing,
+  CostEstimate,
+} from '@agentstack/sdk';
+```

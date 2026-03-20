@@ -1,0 +1,288 @@
+---
+title: Guard (Guardrails)
+description: Guard provides real-time content safety checks — PII detection, prompt injection blocking, toxicity filtering, and custom policy enforcement.
+---
+
+# Guard (Guardrails)
+
+Guard is AgentStack's guardrails module. It runs content through configurable safety checks in parallel, returning pass/block/warn decisions in milliseconds. Guards can be invoked directly via the API, through the SDK, or automatically as middleware in the Gateway Proxy pipeline.
+
+## Overview
+
+Guard supports eight built-in guard types:
+
+| Guard Type | Detection Method | Latency |
+|-----------|-----------------|---------|
+| `pii` | Regex-based pattern matching | Sub-millisecond |
+| `injection` | Pattern matching + LLM hybrid | Depends on mode |
+| `toxicity` | LLM judge | Depends on model |
+| `hallucination` | LLM judge | Depends on model |
+| `topic` | LLM judge | Depends on model |
+| `code_exec` | Regex pattern matching | Sub-millisecond |
+| `length` | Programmatic character/token counting | Sub-millisecond |
+| `custom` | User-defined LLM policy prompt | Depends on model |
+
+Regex-based guards (PII, code_exec, length) run in under 1ms and are safe for the gateway proxy hot path. LLM-based guards (toxicity, hallucination, topic, custom) use the user's configured API key.
+
+## How It Works
+
+### Guard Engine
+
+The guard engine (`internal/guard/service/engine.go`) runs all applicable guardrails in parallel using goroutines. It short-circuits on the first `block` result -- when any guard with mode `block` triggers, the engine cancels remaining goroutines and returns immediately.
+
+```
+Request arrives
+    |
+    v
+Load guardrails (by ID or all active for direction)
+    |
+    v
+Run all guards in parallel (goroutines)
+    |
+    +-- PII guard ---------- passed
+    +-- Injection guard ---- blocked  <-- short-circuit here
+    +-- Toxicity guard ----- (cancelled)
+    +-- Length guard -------- (cancelled)
+    |
+    v
+Return CheckResponse { passed: false, results: [...] }
+```
+
+### Guard Modes
+
+Each guardrail has a mode that determines what happens when it triggers:
+
+| Mode | Action on trigger | Effect on passed |
+|------|------------------|------------------|
+| `block` | Returns `blocked` | Sets `passed: false`, short-circuits |
+| `warn` | Returns `warned` | `passed` stays `true` |
+| `log` | Returns `warned` | `passed` stays `true` (event logged) |
+
+### Direction
+
+Each guardrail has an `apply_to` field:
+
+- `input` -- checks only inbound content (user messages)
+- `output` -- checks only outbound content (agent responses)
+- `both` -- checks both directions
+
+### PII Detection
+
+The PII guard uses compiled regex patterns for each PII type. No LLM calls are made -- this runs in under 1ms.
+
+Supported PII types:
+
+| Type | Pattern | Redaction Token |
+|------|---------|-----------------|
+| `email` | Standard email regex | `[REDACTED_EMAIL]` |
+| `phone` | US phone numbers with optional country code | `[REDACTED_PHONE]` |
+| `ssn` | `XXX-XX-XXXX` format | `[REDACTED_SSN]` |
+| `credit_card` | 16-digit card numbers (with optional separators) | `[REDACTED_CREDIT_CARD]` |
+| `ip_address` | IPv4 addresses | `[REDACTED_IP]` |
+| `date_of_birth` | `MM/DD/YYYY` or `MM-DD-YYYY` format | `[REDACTED_DOB]` |
+
+Configure which types to detect via the guardrail config:
+
+```json
+{
+  "detect": ["email", "phone", "ssn", "credit_card"]
+}
+```
+
+### Prompt Injection Detection
+
+The injection guard uses pattern matching to detect common prompt injection techniques:
+
+- "Ignore previous instructions"
+- "You are now..."
+- System prompt extraction attempts
+- Delimiter injection
+- Role switching attempts
+
+### Code Execution Detection
+
+The code execution guard uses regex patterns to detect dangerous code patterns:
+
+- `eval()`, `exec()`, `os.system()`
+- Shell command injection patterns
+- File system access patterns
+
+Custom block patterns can be added via config:
+
+```json
+{
+  "block_patterns": ["subprocess\\.call", "import\\s+ctypes"]
+}
+```
+
+### Length Guard
+
+Programmatic length checking with configurable limits:
+
+```json
+{
+  "min_chars": 10,
+  "max_chars": 5000,
+  "min_tokens": 5,
+  "max_tokens": 2000
+}
+```
+
+### Custom Policy Guard
+
+Define your own guard with a natural language policy prompt:
+
+```json
+{
+  "policy_prompt": "Reject any content that discusses competitor products by name or makes unverified medical claims."
+}
+```
+
+## API Reference
+
+### Check Content
+
+```
+POST /v1/guard/check
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+{
+  "content": "My email is john@example.com and my SSN is 123-45-6789",
+  "direction": "input",
+  "guardrail_ids": ["guard_abc123"],
+  "session_id": "sess_xyz"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `content` | Yes | The text to check |
+| `direction` | No | `input` (default) or `output` |
+| `guardrail_ids` | No | Specific guardrails to run; if omitted, all active guardrails matching the direction are used |
+| `session_id` | No | Associate the check with a session for analytics |
+
+Response:
+
+```json
+{
+  "passed": false,
+  "results": [
+    {
+      "guardrail_id": "guard_abc123",
+      "type": "pii",
+      "action": "blocked",
+      "findings": {
+        "pii_items": [
+          { "type": "email", "value": "john@example.com", "start": 12, "end": 28 },
+          { "type": "ssn", "value": "123-45-6789", "start": 43, "end": 54 }
+        ],
+        "count": 2,
+        "detail": "PII detected: 1 email, 1 ssn"
+      },
+      "latency_ms": 0
+    }
+  ]
+}
+```
+
+Guard events are persisted asynchronously after the response is returned.
+
+### Create Guardrail Rule
+
+```
+POST /v1/guard/rules
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+```json
+{
+  "name": "Block PII in inputs",
+  "description": "Detects and blocks PII in user messages",
+  "type": "pii",
+  "mode": "block",
+  "config": {
+    "detect": ["email", "phone", "ssn", "credit_card"]
+  },
+  "apply_to": "input",
+  "enabled": true,
+  "priority": 10
+}
+```
+
+| Field | Required | Valid Values |
+|-------|----------|-------------|
+| `name` | Yes | Any string |
+| `type` | Yes | `pii`, `injection`, `toxicity`, `hallucination`, `topic`, `code_exec`, `length`, `custom` |
+| `mode` | No (default: `block`) | `block`, `warn`, `log` |
+| `apply_to` | No (default: `both`) | `input`, `output`, `both` |
+| `config` | No (default: `{}`) | Type-specific JSON configuration |
+| `enabled` | No (default: `true`) | Boolean |
+| `priority` | No (default: `0`) | Integer (higher priority runs first) |
+
+Response (`201 Created`): the created guardrail object.
+
+### List Guardrail Rules
+
+```
+GET /v1/guard/rules
+Authorization: Bearer as_sk_your_key
+```
+
+### Get Guardrail Rule
+
+```
+GET /v1/guard/rules/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+### Update Guardrail Rule
+
+```
+PUT /v1/guard/rules/{id}
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+Accepts partial updates -- only include the fields you want to change.
+
+### Delete Guardrail Rule
+
+```
+DELETE /v1/guard/rules/{id}
+Authorization: Bearer as_sk_your_key
+```
+
+### SDK Usage (Python)
+
+```python
+import agentstack
+
+agentstack.init(api_key="as_sk_your_key", endpoint="http://localhost:8080")
+
+result = agentstack.guard.check(
+    content="My email is john@example.com",
+    direction="input",
+    session_id="sess_abc123"
+)
+
+if not result.passed:
+    print("Content blocked:", result.results)
+```
+
+## Dashboard Guide
+
+### Guard Overview (`/dashboard/guard`)
+
+Displays:
+- **Metric cards**: Total checks, block rate, average latency, active rules count.
+- **Checks over time**: Area chart of guard check volume.
+- **Block reasons**: Bar chart breaking down blocks by guard type.
+- **Recent events table**: Latest guard events with action, type, findings, and latency.
+
+### Rule Detail (`/dashboard/guard/rules/{id}`)
+
+Shows the full rule configuration with an inline test interface. Enter text, click "Test", and see the guard result in real time. Edit the rule configuration directly from this page.

@@ -1,0 +1,206 @@
+---
+title: Shield (Self-Healing)
+description: Shield automatically detects and fixes common AI agent failures — loops, hallucinations, cost overruns, and timeouts — without human intervention.
+---
+
+# Shield (Self-Healing)
+
+Shield is AgentStack's self-healing module. It runs inside the SDK and automatically detects and recovers from common agent failures: infinite loops, hallucinations, cost overruns, and timeouts. When an intervention occurs, Shield reports it to the API server for analytics and session replay visualization.
+
+## Overview
+
+Shield is the unique differentiator in AgentStack. No other observability platform offers automatic self-healing. The healing engine lives in the SDK (Python and TypeScript), intercepts failures at runtime, applies a fix, and logs the intervention as a healing event.
+
+## How It Works
+
+### Healing Types
+
+Shield supports six healing types, stored as a ClickHouse `Enum8`:
+
+| Healing Type | Trigger | Action Taken |
+|-------------|---------|--------------|
+| `loop_breaker` | Agent repeats the same tool call or output N times | Breaks the loop, injects a "you are repeating yourself" prompt |
+| `hallucination_fix` | Agent produces output that fails a grounding check | Re-prompts with stricter instructions and original context |
+| `cost_circuit_breaker` | Session cost exceeds the configured threshold | Downgrades to a cheaper model or terminates the session |
+| `timeout_handler` | A span exceeds the configured timeout | Cancels the call, returns a fallback response |
+| `error_recovery` | An LLM call or tool call throws an exception | Retries with exponential backoff or falls back |
+| `custom` | User-defined condition | User-defined action |
+
+### SDK Integration (Python)
+
+Shield is enabled via the `healing` parameter on the `@trace` decorator or the `agentstack.protect()` wrapper:
+
+```python
+import agentstack
+from agentstack.healing import HealingConfig
+
+agentstack.init(
+    api_key="as_sk_your_key",
+    endpoint="http://localhost:8080"
+)
+
+# Configure healing thresholds
+config = HealingConfig(
+    loop_threshold=3,          # Break after 3 repeated outputs
+    cost_limit_cents=500,      # Circuit-break at $5.00
+    timeout_seconds=30,        # Timeout individual spans at 30s
+    enable_hallucination_fix=True,
+    enable_error_recovery=True
+)
+
+@agentstack.trace(healing=True, healing_config=config)
+def my_agent(input_text: str):
+    # Your agent logic here
+    pass
+```
+
+### SDK Integration (TypeScript)
+
+```typescript
+import { init, trace, HealingConfig } from 'agentstack';
+
+init({
+  apiKey: 'as_sk_your_key',
+  endpoint: 'http://localhost:8080'
+});
+
+const healingConfig: HealingConfig = {
+  loopThreshold: 3,
+  costLimitCents: 500,
+  timeoutSeconds: 30,
+  enableHallucinationFix: true,
+  enableErrorRecovery: true
+};
+
+const myAgent = trace({ healing: true, healingConfig }, async (input: string) => {
+  // Your agent logic here
+});
+```
+
+### Data Flow
+
+1. The SDK's `HealingEngine` monitors spans as they execute.
+2. When a failure condition is detected, the engine applies the appropriate fix.
+3. The intervention is recorded as a `HealingIngestRequest` and sent to `POST /v1/ingest/healing`.
+4. The API server publishes the event to NATS subject `trace.ingest.healing`.
+5. The ingest writer worker batch-writes healing events to ClickHouse.
+
+## API Reference
+
+### Ingest Healing Events
+
+```
+POST /v1/ingest/healing
+Authorization: Bearer as_sk_your_key
+Content-Type: application/json
+```
+
+Request body (array of healing events):
+
+```json
+[
+  {
+    "session_id": "sess_abc123",
+    "span_id": "span_def456",
+    "agent_name": "customer-support-agent",
+    "healing_type": "loop_breaker",
+    "trigger_reason": "Agent repeated tool call 'search_docs' 3 times with identical arguments",
+    "action_taken": "Injected prompt: 'You are repeating the same action. Try a different approach.'",
+    "original_state": "{\"last_tool_call\": \"search_docs\", \"repeat_count\": 3}",
+    "healed_state": "{\"injected_prompt\": true, \"new_approach\": true}",
+    "success": true,
+    "latency_ms": 12,
+    "metadata": "{}"
+  }
+]
+```
+
+Response (`202 Accepted`):
+
+```json
+{
+  "status": "accepted",
+  "count": 1
+}
+```
+
+**Validation rules:**
+- `session_id` is required on every event.
+- `healing_type` is required and must be one of: `loop_breaker`, `hallucination_fix`, `cost_circuit_breaker`, `timeout_handler`, `error_recovery`, `custom`.
+- If `id` is omitted, the server generates a UUID.
+- If `created_at` is omitted, the server uses the current UTC time.
+
+### Get Session Healing Events
+
+```
+GET /v1/sessions/{id}/healing
+Authorization: Bearer as_sk_your_key
+```
+
+Response:
+
+```json
+{
+  "healing_events": [
+    {
+      "id": "evt_abc123",
+      "session_id": "sess_abc123",
+      "span_id": "span_def456",
+      "org_id": "org_xyz",
+      "agent_name": "customer-support-agent",
+      "healing_type": "loop_breaker",
+      "trigger_reason": "Agent repeated tool call 3 times",
+      "action_taken": "Injected corrective prompt",
+      "success": true,
+      "latency_ms": 12,
+      "created_at": "2025-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+### Healing Analytics
+
+```
+GET /v1/analytics/healing?start=2025-01-01T00:00:00Z&end=2025-01-31T23:59:59Z&interval=3600
+Authorization: Bearer as_sk_your_key
+```
+
+Query parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `start` | 24 hours ago | Start of time range (RFC3339) |
+| `end` | now | End of time range (RFC3339) |
+| `interval` | 3600 | Bucket size in seconds for time-series data |
+
+Response:
+
+```json
+{
+  "total_interventions": 142,
+  "success_count": 135,
+  "success_rate": 0.9507,
+  "by_type": [
+    { "healing_type": "loop_breaker", "count": 58, "success_count": 55 },
+    { "healing_type": "timeout_handler", "count": 41, "success_count": 40 },
+    { "healing_type": "error_recovery", "count": 28, "success_count": 27 },
+    { "healing_type": "cost_circuit_breaker", "count": 15, "success_count": 13 }
+  ],
+  "over_time": [
+    { "timestamp": "2025-01-15T10:00:00Z", "total": 8, "success": 7 },
+    { "timestamp": "2025-01-15T11:00:00Z", "total": 12, "success": 12 }
+  ]
+}
+```
+
+## Dashboard Guide
+
+The Shield dashboard is accessible at `/dashboard/healing` and provides:
+
+- **Intervention Metrics**: Total interventions, success rate, and interventions-per-session displayed as animated metric cards.
+- **Healing Over Time**: Area chart showing intervention volume and success rate over the selected time range.
+- **By Type Breakdown**: Bar chart showing the distribution of healing types (loop_breaker, timeout_handler, etc.).
+- **Events Table**: Sortable table of individual healing events with session ID, type, trigger reason, success status, and latency.
+
+Session replay at `/dashboard/sessions/{id}` shows healing intervention markers inline on the D3.js Gantt timeline, rendered with the cyan healing color (`#38bdf8`) and a pulse-glow animation.
