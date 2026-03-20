@@ -214,7 +214,7 @@ function ParamSlider({
             </TooltipTrigger>
             <TooltipContent
               side="left"
-              className="bg-[#1a1a2e] border-[rgba(255,255,255,0.1)] text-[var(--text-secondary)] text-xs max-w-[200px]"
+              className="bg-[var(--bg-tertiary)] border-[var(--border-default)] text-[var(--text-secondary)] text-xs max-w-[200px]"
             >
               {tooltip}
             </TooltipContent>
@@ -295,9 +295,9 @@ function OutputPanel({
   const isComplete = output && output.displayedText.length >= output.text.length;
 
   return (
-    <div className="rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#12121e] overflow-hidden flex flex-col h-full">
+    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden flex flex-col h-full">
       {/* Output header */}
-      <div className="px-4 py-3 border-b border-[rgba(255,255,255,0.06)] flex items-center justify-between shrink-0">
+      <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           {modelConfig && (
             <ProviderIcon provider={modelConfig.provider} color={modelConfig.providerColor} />
@@ -331,7 +331,7 @@ function OutputPanel({
               <Coins className="w-3 h-3" />
               <span className="tabular-nums">{output.cost}</span>
             </div>
-            <Separator orientation="vertical" className="h-3 bg-[rgba(255,255,255,0.06)]" />
+            <Separator orientation="vertical" className="h-3 bg-[var(--border-subtle)]" />
             <button
               onClick={() => onCopy(output.text)}
               className="text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors p-0.5"
@@ -623,12 +623,12 @@ export default function PlaygroundPage() {
               </TooltipTrigger>
               <TooltipContent
                 side="bottom"
-                className="bg-[#1a1a2e] border-[rgba(255,255,255,0.1)] text-xs"
+                className="bg-[var(--bg-tertiary)] border-[var(--border-default)] text-xs"
               >
                 {historyOpen ? "Hide history" : "Show history"}
               </TooltipContent>
             </Tooltip>
-            <kbd className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded border border-[rgba(255,255,255,0.06)] bg-[var(--bg-hover)] text-[10px] text-[var(--text-tertiary)]">
+            <kbd className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-hover)] text-[10px] text-[var(--text-tertiary)]">
               <span className="text-[11px]">&#8984;</span> + Enter to run
             </kbd>
           </div>
@@ -662,7 +662,7 @@ export default function PlaygroundPage() {
                 className="flex flex-col flex-1 min-h-0"
               >
                 <div className="flex items-center justify-between mb-4">
-                  <TabsList className="bg-[#12121e] border border-[rgba(255,255,255,0.06)] h-9">
+                  <TabsList className="bg-[var(--bg-secondary)] border border-[var(--border-subtle)] h-9">
                     <TabsTrigger
                       value="single"
                       className="text-xs data-[state=active]:bg-[var(--accent-blue)]/15 data-[state=active]:text-[var(--accent-blue)] data-[state=active]:shadow-none px-4 h-7"
@@ -708,7 +708,7 @@ export default function PlaygroundPage() {
                   <div className="flex-1 flex flex-col gap-3 min-w-0 min-h-0">
                     {/* System Prompt (collapsible) */}
                     <motion.div
-                      className="rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#12121e] overflow-hidden shrink-0"
+                      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden shrink-0"
                       layout
                     >
                       <button
@@ -739,7 +739,7 @@ export default function PlaygroundPage() {
                                 value={systemPrompt}
                                 onChange={(e) => setSystemPrompt(e.target.value)}
                                 rows={3}
-                                className="w-full rounded-lg border border-[rgba(255,255,255,0.06)] bg-[var(--bg-primary)] px-3 py-2 text-xs font-mono text-[var(--text-secondary)] resize-none outline-none focus:border-[var(--accent-blue)]/50 transition-colors placeholder:text-[var(--text-tertiary)]"
+                                className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-2 text-xs font-mono text-[var(--text-secondary)] resize-none outline-none focus:border-[var(--accent-blue)]/50 transition-colors placeholder:text-[var(--text-tertiary)]"
                                 placeholder="You are a helpful assistant..."
                               />
                             </div>
@@ -752,7 +752,7 @@ export default function PlaygroundPage() {
                     <TabsContent value="single" className="mt-0 shrink-0">
                       <div className="flex items-center gap-3">
                         <Select value={model} onValueChange={setModel}>
-                          <SelectTrigger className="w-[260px] h-9 bg-[#12121e] border-[rgba(255,255,255,0.06)] text-sm">
+                          <SelectTrigger className="w-[260px] h-9 bg-[var(--bg-secondary)] border-[var(--border-subtle)] text-sm">
                             <SelectValue>
                               <span className="flex items-center gap-2">
                                 <ProviderIcon
@@ -765,7 +765,7 @@ export default function PlaygroundPage() {
                               </span>
                             </SelectValue>
                           </SelectTrigger>
-                          <SelectContent className="bg-[#1a1a2e] border-[rgba(255,255,255,0.1)]">
+                          <SelectContent className="bg-[var(--bg-tertiary)] border-[var(--border-default)]">
                             {["OpenAI", "Anthropic", "Google", "Mistral", "Meta"].map((provider) => {
                               const providerModels = MODELS.filter((m) => m.provider === provider);
                               if (providerModels.length === 0) return null;
@@ -802,7 +802,7 @@ export default function PlaygroundPage() {
                     <TabsContent value="compare" className="mt-0 shrink-0">
                       <div className="flex items-center gap-3">
                         <Select value={compareModelA} onValueChange={setCompareModelA}>
-                          <SelectTrigger className="flex-1 h-9 bg-[#12121e] border-[rgba(255,255,255,0.06)] text-sm">
+                          <SelectTrigger className="flex-1 h-9 bg-[var(--bg-secondary)] border-[var(--border-subtle)] text-sm">
                             <SelectValue>
                               <span className="flex items-center gap-2">
                                 <ProviderIcon
@@ -815,7 +815,7 @@ export default function PlaygroundPage() {
                               </span>
                             </SelectValue>
                           </SelectTrigger>
-                          <SelectContent className="bg-[#1a1a2e] border-[rgba(255,255,255,0.1)]">
+                          <SelectContent className="bg-[var(--bg-tertiary)] border-[var(--border-default)]">
                             {MODELS.map((m) => (
                               <SelectItem
                                 key={m.id}
@@ -834,7 +834,7 @@ export default function PlaygroundPage() {
                         <span className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">vs</span>
 
                         <Select value={compareModelB} onValueChange={setCompareModelB}>
-                          <SelectTrigger className="flex-1 h-9 bg-[#12121e] border-[rgba(255,255,255,0.06)] text-sm">
+                          <SelectTrigger className="flex-1 h-9 bg-[var(--bg-secondary)] border-[var(--border-subtle)] text-sm">
                             <SelectValue>
                               <span className="flex items-center gap-2">
                                 <ProviderIcon
@@ -847,7 +847,7 @@ export default function PlaygroundPage() {
                               </span>
                             </SelectValue>
                           </SelectTrigger>
-                          <SelectContent className="bg-[#1a1a2e] border-[rgba(255,255,255,0.1)]">
+                          <SelectContent className="bg-[var(--bg-tertiary)] border-[var(--border-default)]">
                             {MODELS.map((m) => (
                               <SelectItem
                                 key={m.id}
@@ -866,8 +866,8 @@ export default function PlaygroundPage() {
                     </TabsContent>
 
                     {/* Prompt Editor */}
-                    <div className="rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#12121e] overflow-hidden shrink-0">
-                      <div className="px-4 py-2.5 border-b border-[rgba(255,255,255,0.04)] flex items-center justify-between">
+                    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] overflow-hidden shrink-0">
+                      <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] flex items-center justify-between">
                         <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
                           User Prompt
                         </span>
@@ -919,7 +919,7 @@ export default function PlaygroundPage() {
 
                   {/* Right Sidebar: Parameters */}
                   <div className="hidden lg:flex w-[220px] shrink-0">
-                    <div className="w-full rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#12121e] p-4 space-y-5 h-fit">
+                    <div className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4 space-y-5 h-fit">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
                           Parameters
@@ -941,7 +941,7 @@ export default function PlaygroundPage() {
                           </TooltipTrigger>
                           <TooltipContent
                             side="left"
-                            className="bg-[#1a1a2e] border-[rgba(255,255,255,0.1)] text-xs"
+                            className="bg-[var(--bg-tertiary)] border-[var(--border-default)] text-xs"
                           >
                             Reset to defaults
                           </TooltipContent>
@@ -969,7 +969,7 @@ export default function PlaygroundPage() {
                               </TooltipTrigger>
                               <TooltipContent
                                 side="left"
-                                className="bg-[#1a1a2e] border-[rgba(255,255,255,0.1)] text-[var(--text-secondary)] text-xs max-w-[200px]"
+                                className="bg-[var(--bg-tertiary)] border-[var(--border-default)] text-[var(--text-secondary)] text-xs max-w-[200px]"
                               >
                                 Maximum number of tokens in the response.
                               </TooltipContent>
@@ -982,11 +982,11 @@ export default function PlaygroundPage() {
                           onChange={(e) => setMaxTokens(Math.max(1, Math.min(4096, parseInt(e.target.value) || 1)))}
                           min={1}
                           max={4096}
-                          className="w-full h-8 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[var(--bg-primary)] px-3 text-xs font-mono text-[var(--accent-blue)] outline-none focus:border-[var(--accent-blue)]/50 transition-colors tabular-nums"
+                          className="w-full h-8 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-xs font-mono text-[var(--accent-blue)] outline-none focus:border-[var(--accent-blue)]/50 transition-colors tabular-nums"
                         />
                       </div>
 
-                      <Separator className="bg-[rgba(255,255,255,0.04)]" />
+                      <Separator className="bg-[var(--border-subtle)]" />
 
                       <ParamSlider
                         label="Top P"
@@ -1033,8 +1033,8 @@ export default function PlaygroundPage() {
                   transition={{ duration: 0.2, ease: "easeInOut" }}
                   className="hidden lg:block shrink-0 overflow-hidden"
                 >
-                  <div className="w-[260px] h-full rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#12121e] flex flex-col">
-                    <div className="px-4 py-3 border-b border-[rgba(255,255,255,0.04)] flex items-center justify-between shrink-0">
+                  <div className="w-[260px] h-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] flex flex-col">
+                    <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between shrink-0">
                       <div className="flex items-center gap-2">
                         <Clock className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
                         <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
@@ -1056,7 +1056,7 @@ export default function PlaygroundPage() {
                           </TooltipTrigger>
                           <TooltipContent
                             side="left"
-                            className="bg-[#1a1a2e] border-[rgba(255,255,255,0.1)] text-xs"
+                            className="bg-[var(--bg-tertiary)] border-[var(--border-default)] text-xs"
                           >
                             Clear history
                           </TooltipContent>

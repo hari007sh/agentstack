@@ -18,56 +18,17 @@ import { MetricCard } from "@/components/metric-card";
 import { fadeIn, staggerContainer, staggerItem } from "@/lib/animations";
 import { SkeletonMetricCards, SkeletonTable } from "@/components/skeleton";
 import { Button } from "@/components/ui/button";
+import { api, ApiError } from "@/lib/api";
 import type { HealingEvent } from "@/lib/types";
 
-// --- Mock Data ---
+// ---------------------------------------------------------------------------
+// Mock data — used as fallback when the backend is unreachable
+// ---------------------------------------------------------------------------
 const mockMetrics = {
   total_interventions: 342,
   success_rate: 94.7,
   saved_cost_cents: 128400,
   active_shields: 5,
-};
-
-const healingTypeConfig: Record<
-  string,
-  { label: string; color: string; bgColor: string; icon: React.ElementType }
-> = {
-  loop_breaker: {
-    label: "Loop Breaker",
-    color: "var(--accent-blue)",
-    bgColor: "var(--accent-blue)",
-    icon: RefreshCw,
-  },
-  hallucination_fix: {
-    label: "Hallucination Fix",
-    color: "var(--accent-purple)",
-    bgColor: "var(--accent-purple)",
-    icon: Bug,
-  },
-  cost_circuit_breaker: {
-    label: "Cost Circuit Breaker",
-    color: "var(--accent-amber)",
-    bgColor: "var(--accent-amber)",
-    icon: DollarSign,
-  },
-  timeout_handler: {
-    label: "Timeout Handler",
-    color: "var(--accent-red)",
-    bgColor: "var(--accent-red)",
-    icon: Timer,
-  },
-  error_recovery: {
-    label: "Error Recovery",
-    color: "var(--accent-green)",
-    bgColor: "var(--accent-green)",
-    icon: AlertTriangle,
-  },
-  custom: {
-    label: "Custom",
-    color: "var(--text-tertiary)",
-    bgColor: "var(--text-tertiary)",
-    icon: Shield,
-  },
 };
 
 const mockEvents: (HealingEvent & { time_ago: string })[] = [
@@ -164,41 +125,176 @@ const mockEvents: (HealingEvent & { time_ago: string })[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Healing type visual config
+// ---------------------------------------------------------------------------
+const healingTypeConfig: Record<
+  string,
+  { label: string; color: string; bgColor: string; icon: React.ElementType }
+> = {
+  loop_breaker: {
+    label: "Loop Breaker",
+    color: "var(--accent-blue)",
+    bgColor: "var(--accent-blue)",
+    icon: RefreshCw,
+  },
+  hallucination_fix: {
+    label: "Hallucination Fix",
+    color: "var(--accent-purple)",
+    bgColor: "var(--accent-purple)",
+    icon: Bug,
+  },
+  cost_circuit_breaker: {
+    label: "Cost Circuit Breaker",
+    color: "var(--accent-amber)",
+    bgColor: "var(--accent-amber)",
+    icon: DollarSign,
+  },
+  timeout_handler: {
+    label: "Timeout Handler",
+    color: "var(--accent-red)",
+    bgColor: "var(--accent-red)",
+    icon: Timer,
+  },
+  error_recovery: {
+    label: "Error Recovery",
+    color: "var(--accent-green)",
+    bgColor: "var(--accent-green)",
+    icon: AlertTriangle,
+  },
+  custom: {
+    label: "Custom",
+    color: "var(--text-tertiary)",
+    bgColor: "var(--text-tertiary)",
+    icon: Shield,
+  },
+};
+
 const timeRanges = [
   { label: "Last 24h", value: "24h" },
   { label: "7d", value: "7d" },
   { label: "30d", value: "30d" },
 ];
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Map a time range selector value to {start, end} ISO strings. */
+function rangeToParams(range: string): { start: string; end: string } {
+  const now = new Date();
+  const end = now.toISOString();
+  let start: Date;
+  switch (range) {
+    case "7d":
+      start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      break;
+    case "30d":
+      start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      break;
+    default:
+      start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  }
+  return { start: start.toISOString(), end };
+}
+
+// ---------------------------------------------------------------------------
+// API response shapes (match Go backend exactly)
+// ---------------------------------------------------------------------------
+interface HealingAnalyticsResponse {
+  total_interventions: number;
+  success_count: number;
+  success_rate: number;
+  by_type: { healing_type: string; count: number; success_rate: number }[];
+  over_time: { timestamp: string; count: number; successes: number }[];
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export default function HealingPage() {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [usingMock, setUsingMock] = useState(false);
   const [events, setEvents] = useState<(HealingEvent & { time_ago: string })[]>([]);
+  const [metrics, setMetrics] = useState(mockMetrics);
   const [selectedRange, setSelectedRange] = useState("24h");
 
-  const fetchHealingData = useCallback(() => {
-    setLoading(true);
-    setFetchError(null);
+  const fetchHealingData = useCallback(
+    async (range: string) => {
+      setLoading(true);
+      setFetchError(null);
+      setUsingMock(false);
 
-    try {
-      // TODO: Replace with api.get<HealingEvent[]>("/v1/analytics/healing") when backend is ready
-      const timer = setTimeout(() => {
-        setEvents(mockEvents);
+      // Set auth token from localStorage
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      if (token) {
+        api.setToken(token);
+      }
+
+      const { start, end } = rangeToParams(range);
+
+      try {
+        // Fetch analytics and recent events in parallel
+        const [analyticsData] = await Promise.all([
+          api.get<HealingAnalyticsResponse>(
+            `/v1/analytics/healing?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
+          ),
+        ]);
+
+        // Map analytics to metrics
+        setMetrics({
+          total_interventions: analyticsData.total_interventions,
+          success_rate:
+            analyticsData.success_rate > 1
+              ? analyticsData.success_rate
+              : analyticsData.success_rate * 100, // backend may return 0-1 or 0-100
+          saved_cost_cents: mockMetrics.saved_cost_cents, // not available from analytics endpoint
+          active_shields: analyticsData.by_type?.length ?? 0,
+        });
+
+        // The analytics endpoint does not return individual events.
+        // We need a list endpoint. The backend has GET /v1/sessions/{id}/healing
+        // for per-session events but no global "recent healing events" list.
+        // We derive events from the over_time data + by_type, but since the
+        // analytics endpoint doesn't return individual rows, we check if
+        // total_interventions > 0 but have no events to show — leave events
+        // empty and show empty state for the table, or try to build a
+        // supplementary fetch.
+        //
+        // For now: if analytics returns data, we show the metrics from the API
+        // and leave the events table empty (the backend lacks a global healing
+        // events list endpoint). The table will show the empty state.
+        //
+        // A future improvement would add GET /v1/healing/events to the backend.
+        setEvents([]);
         setLoading(false);
-      }, 800);
-      return () => clearTimeout(timer);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to load healing data";
-      console.error(`[AgentStack] ${new Date().toISOString()} HealingPage ${message}`);
-      setFetchError(message);
-      setLoading(false);
-    }
-  }, []);
+      } catch (err) {
+        // Fallback to mock data when backend is unreachable
+        const message =
+          err instanceof ApiError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : "Failed to load healing data";
+
+        console.warn(
+          `[AgentStack] ${new Date().toISOString()} HealingPage: API call failed, falling back to mock data. Reason: ${message}`
+        );
+
+        setMetrics(mockMetrics);
+        setEvents(mockEvents);
+        setUsingMock(true);
+        setLoading(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
-    const cleanup = fetchHealingData();
-    return cleanup;
-  }, [fetchHealingData]);
+    fetchHealingData(selectedRange);
+  }, [fetchHealingData, selectedRange]);
 
   const isEmpty = !loading && !fetchError && events.length === 0;
 
@@ -217,21 +313,29 @@ export default function HealingPage() {
             Self-healing actions taken by Shield to recover agent failures
           </p>
         </div>
-        {/* Time Range Selector */}
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-subtle)]">
-          {timeRanges.map((range) => (
-            <button
-              key={range.value}
-              onClick={() => setSelectedRange(range.value)}
-              className={`px-3 py-1.5 text-xs rounded-md font-medium transition-all duration-150 ${
-                selectedRange === range.value
-                  ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm border border-[var(--border-subtle)]"
-                  : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
-              }`}
-            >
-              {range.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          {/* Mock data indicator */}
+          {usingMock && !loading && (
+            <span className="text-[10px] uppercase tracking-wider text-[var(--accent-amber)] font-medium px-2 py-1 rounded-md bg-[var(--accent-amber)]/10 border border-[var(--accent-amber)]/20">
+              Demo Data
+            </span>
+          )}
+          {/* Time Range Selector */}
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-subtle)]">
+            {timeRanges.map((range) => (
+              <button
+                key={range.value}
+                onClick={() => setSelectedRange(range.value)}
+                className={`px-3 py-1.5 text-xs rounded-md font-medium transition-all duration-150 ${
+                  selectedRange === range.value
+                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm border border-[var(--border-subtle)]"
+                    : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                }`}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -247,14 +351,14 @@ export default function HealingPage() {
         >
           <MetricCard
             title="Total Interventions"
-            value={mockMetrics.total_interventions}
+            value={metrics.total_interventions}
             icon={Shield}
             color="cyan"
             change={8.3}
           />
           <MetricCard
             title="Success Rate"
-            value={mockMetrics.success_rate}
+            value={metrics.success_rate}
             format="percent"
             icon={Activity}
             color="green"
@@ -262,7 +366,7 @@ export default function HealingPage() {
           />
           <MetricCard
             title="Saved Cost"
-            value={mockMetrics.saved_cost_cents}
+            value={metrics.saved_cost_cents}
             format="currency"
             icon={DollarSign}
             color="amber"
@@ -270,7 +374,7 @@ export default function HealingPage() {
           />
           <MetricCard
             title="Active Shields"
-            value={mockMetrics.active_shields}
+            value={metrics.active_shields}
             icon={ShieldCheck}
             color="blue"
           />
@@ -291,7 +395,7 @@ export default function HealingPage() {
             {fetchError}
           </p>
           <Button
-            onClick={fetchHealingData}
+            onClick={() => fetchHealingData(selectedRange)}
             variant="outline"
             size="sm"
             className="gap-1.5 border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"

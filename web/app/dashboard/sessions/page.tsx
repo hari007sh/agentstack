@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -10,15 +10,63 @@ import {
   ChevronRight,
   RefreshCw,
   AlertTriangle,
+  Info,
 } from "lucide-react";
 import { fadeIn, staggerContainer, staggerItem } from "@/lib/animations";
 import { SkeletonTable } from "@/components/skeleton";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { api, ApiError } from "@/lib/api";
 import type { Session } from "@/lib/types";
 
-// --- Mock Data ---
-const mockSessions: (Session & { time_ago: string })[] = [
+// ---------------------------------------------------------------------------
+// API response shape from GET /v1/sessions
+// ---------------------------------------------------------------------------
+interface SessionsAPIResponse {
+  sessions: Session[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+// ---------------------------------------------------------------------------
+// Display type — the Session plus a computed time_ago string
+// ---------------------------------------------------------------------------
+type DisplaySession = Session & { time_ago: string };
+
+// ---------------------------------------------------------------------------
+// Relative-time formatter
+// ---------------------------------------------------------------------------
+function formatTimeAgo(iso: string): string {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 0) return "just now";
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+// ---------------------------------------------------------------------------
+// Map API sessions to display sessions
+// ---------------------------------------------------------------------------
+function toDisplaySessions(sessions: Session[]): DisplaySession[] {
+  return sessions.map((s) => ({
+    ...s,
+    // Ensure tags is always an array (Go may serialize null as null)
+    tags: s.tags ?? [],
+    time_ago: formatTimeAgo(s.started_at),
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Mock data — used as fallback when the backend is unavailable
+// ---------------------------------------------------------------------------
+const mockSessions: DisplaySession[] = [
   {
     id: "ses_a1b2c3d4",
     org_id: "org_1",
@@ -244,41 +292,80 @@ export default function SessionsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<(Session & { time_ago: string })[]>([]);
+  const [sessions, setSessions] = useState<DisplaySession[]>([]);
+  const [usingMockData, setUsingMockData] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
   const pageSize = 10;
 
-  const fetchSessions = useCallback(() => {
+  // Abort controller ref so we can cancel in-flight requests on unmount / re-fetch
+  const abortRef = useRef<AbortController | null>(null);
+
+  const fetchSessions = useCallback(async () => {
+    // Cancel any in-flight request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     setFetchError(null);
+    setUsingMockData(false);
 
     try {
-      // TODO: Replace with api.get<Session[]>("/v1/sessions") when backend is ready
-      const timer = setTimeout(() => {
-        setSessions(mockSessions);
-        setLoading(false);
-      }, 800);
-      return () => clearTimeout(timer);
+      // Ensure the API client has the JWT token from localStorage
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      if (token) {
+        api.setToken(token);
+      }
+
+      // Call the real backend: GET /v1/sessions
+      // The /v1 routes use API key auth. The JWT token stored in localStorage
+      // is set as a Bearer token. If the backend rejects it (no valid API key
+      // session), we gracefully fall back to mock data below.
+      const data = await api.get<SessionsAPIResponse>("/v1/sessions?limit=200");
+
+      // If the component unmounted or a newer fetch started, bail out
+      if (controller.signal.aborted) return;
+
+      const displaySessions = toDisplaySessions(data.sessions);
+      setSessions(displaySessions);
+      setLoading(false);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to load sessions";
-      console.error(`[AgentStack] ${new Date().toISOString()} SessionsPage ${message}`);
-      setFetchError(message);
+      // If aborted (unmount / newer fetch), do nothing
+      if (controller.signal.aborted) return;
+
+      const message =
+        err instanceof ApiError
+          ? `${err.message} (${err.code})`
+          : err instanceof Error
+            ? err.message
+            : "Failed to load sessions";
+
+      console.warn(
+        `[AgentStack] ${new Date().toISOString()} SessionsPage: API fetch failed, falling back to mock data. Reason: ${message}`
+      );
+
+      // FALLBACK: use mock data so the page still renders during development
+      setSessions(mockSessions);
+      setUsingMockData(true);
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    const cleanup = fetchSessions();
-    return cleanup;
+    fetchSessions();
+    return () => {
+      abortRef.current?.abort();
+    };
   }, [fetchSessions]);
 
   const handleRefresh = () => {
     setRefreshing(true);
-    fetchSessions();
-    setTimeout(() => setRefreshing(false), 800);
+    fetchSessions().finally(() => {
+      setTimeout(() => setRefreshing(false), 400);
+    });
   };
 
   const filtered = sessions.filter((s) => {
@@ -314,6 +401,22 @@ export default function SessionsPage() {
           Browse and inspect agent execution sessions
         </p>
       </div>
+
+      {/* Mock data indicator — shown when the API is unreachable and we fell back */}
+      {usingMockData && !loading && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-[var(--accent-amber)]/20 bg-[var(--accent-amber)]/5 text-xs text-[var(--accent-amber)]">
+          <Info className="w-3.5 h-3.5 flex-shrink-0" />
+          <span>
+            Showing mock data — the backend API is not reachable.{" "}
+            <button
+              onClick={handleRefresh}
+              className="underline underline-offset-2 hover:text-[var(--text-primary)] transition-colors"
+            >
+              Retry
+            </button>
+          </span>
+        </div>
+      )}
 
       {/* Search / Filter Bar */}
       <div className="flex flex-col sm:flex-row gap-3">
