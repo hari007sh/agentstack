@@ -31,7 +31,7 @@ type TestExecutor struct {
 
 // NewTestExecutor creates a new test executor worker.
 func NewTestExecutor(nc *nats.Conn, pg *store.PostgresStore, logger *slog.Logger) *TestExecutor {
-	evalSvc := service.NewEvaluatorService(logger)
+	evalSvc := service.NewEvaluatorService(logger, nil)
 	runnerSvc := service.NewRunnerService(pg, evalSvc, logger)
 
 	return &TestExecutor{
