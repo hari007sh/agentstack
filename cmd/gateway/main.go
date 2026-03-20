@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/agentstack/agentstack/internal/config"
+	costservice "github.com/agentstack/agentstack/internal/cost/service"
+	coststore "github.com/agentstack/agentstack/internal/cost/store"
 	"github.com/agentstack/agentstack/internal/route/gateway"
 	"github.com/agentstack/agentstack/internal/route/service"
 	"github.com/agentstack/agentstack/internal/route/store"
@@ -82,6 +84,13 @@ func main() {
 	asyncLogger := gateway.NewAsyncLogger(natsConn, s, logger)
 	proxy := gateway.NewProxy(router, cache, fallback, asyncLogger, logger)
 
+	// Initialize cost module services for budget enforcement and cost tracking
+	costPG := coststore.NewPostgresStore(db)
+	budgetSvc := costservice.NewBudgetService(costPG, logger)
+	costTracker := costservice.NewTrackerService(costPG, logger)
+	proxy.SetBudgetService(budgetSvc)
+	proxy.SetCostTracker(costTracker)
+
 	// Set up HTTP router
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -91,7 +100,7 @@ func main() {
 		AllowedOrigins:   []string{"*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-AgentStack-Org-ID", "X-AgentStack-Feature", "X-AgentStack-Customer", "X-AgentStack-Cache"},
-		ExposedHeaders:   []string{"X-AgentStack-Request-ID", "X-AgentStack-Provider", "X-AgentStack-Model", "X-AgentStack-Cache-Hit"},
+		ExposedHeaders:   []string{"X-AgentStack-Request-ID", "X-AgentStack-Provider", "X-AgentStack-Model", "X-AgentStack-Cache-Hit", "X-AgentStack-Budget-Warning"},
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
