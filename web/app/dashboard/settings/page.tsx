@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Save,
@@ -17,6 +17,7 @@ import {
   Zap,
   Activity,
   Check,
+  Loader2,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { fadeIn, staggerContainer, staggerItem } from "@/lib/animations";
@@ -38,31 +39,45 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { api, ApiError } from "@/lib/api";
+import { showSuccess, showError, showApiError } from "@/lib/toast";
 
-// Mock data
-const mockOrg = {
-  name: "Acme Corp",
-  slug: "acme-corp",
-  plan: "Team" as const,
-  environment: "production" as const,
-  created_at: "2024-11-15",
-  member_count: 7,
-  events_used: 423847,
-  events_limit: 1000000,
-};
+interface OrgData {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface OrgUsage {
+  member_count: number;
+  key_count: number;
+  plan: string;
+  events_limit: number;
+  created_at: string;
+}
 
 const planColors: Record<string, string> = {
-  "Self-Hosted": "bg-zinc-500/10 text-zinc-400",
-  Cloud: "bg-blue-500/10 text-blue-400",
-  Team: "bg-purple-500/10 text-purple-400",
-  Enterprise: "bg-amber-500/10 text-amber-400",
+  free: "bg-zinc-500/10 text-zinc-400",
+  cloud: "bg-blue-500/10 text-blue-400",
+  team: "bg-purple-500/10 text-purple-400",
+  enterprise: "bg-amber-500/10 text-amber-400",
+};
+
+const planLabels: Record<string, string> = {
+  free: "Self-Hosted",
+  cloud: "Cloud",
+  team: "Team",
+  enterprise: "Enterprise",
 };
 
 const planPrices: Record<string, string> = {
-  "Self-Hosted": "Free",
-  Cloud: "$49/mo",
-  Team: "$199/mo",
-  Enterprise: "Custom",
+  free: "Free",
+  cloud: "$49/mo",
+  team: "$199/mo",
+  enterprise: "Custom",
 };
 
 const timezones = [
@@ -80,8 +95,11 @@ const timezones = [
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
-  const [orgName, setOrgName] = useState(mockOrg.name);
-  const [orgSlug, setOrgSlug] = useState(mockOrg.slug);
+  const [orgName, setOrgName] = useState("");
+  const [orgSlug, setOrgSlug] = useState("");
+  const [orgData, setOrgData] = useState<OrgData | null>(null);
+  const [orgUsage, setOrgUsage] = useState<OrgUsage | null>(null);
+  const [loading, setLoading] = useState(true);
   const [timezone, setTimezone] = useState("America/New_York");
   const [retention, setRetention] = useState("90");
   const [saving, setSaving] = useState(false);
@@ -90,27 +108,123 @@ export default function SettingsPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleting, setDeleting] = useState(false);
 
-  const handleSave = () => {
+  const initToken = useCallback(() => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    if (token) {
+      api.setToken(token);
+    }
+    return !!token;
+  }, []);
+
+  // Fetch org data on mount
+  useEffect(() => {
+    const fetchOrg = async () => {
+      if (!initToken()) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const [org, usage] = await Promise.all([
+          api.get<OrgData>("/api/org"),
+          api.get<OrgUsage>("/api/org/usage"),
+        ]);
+        setOrgData(org);
+        setOrgUsage(usage);
+        setOrgName(org.name);
+        setOrgSlug(org.slug);
+      } catch (err) {
+        if (err instanceof ApiError) {
+          showApiError(err);
+        } else {
+          showError("Failed to load organization settings");
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchOrg();
+  }, [initToken]);
+
+  const handleSave = async () => {
     setSaving(true);
     setSaved(false);
-    setTimeout(() => {
-      setSaving(false);
+
+    try {
+      initToken();
+      const updated = await api.patch<OrgData>("/api/org", {
+        name: orgName.trim(),
+        slug: orgSlug.trim(),
+      });
+      setOrgData(updated);
+      setOrgName(updated.name);
+      setOrgSlug(updated.slug);
       setSaved(true);
+      showSuccess("Settings saved successfully");
       setTimeout(() => setSaved(false), 2000);
-    }, 800);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        showApiError(err);
+      } else {
+        showError("Failed to save settings");
+      }
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDeleteOrg = () => {
-    if (deleteConfirmText !== mockOrg.slug) return;
+  const handleDeleteOrg = async () => {
+    if (!orgData || deleteConfirmText !== orgData.slug) return;
     setDeleting(true);
-    setTimeout(() => {
+
+    try {
+      initToken();
+      await api.delete("/api/org");
+      showSuccess("Organization deleted. You will be redirected.");
+      // Clear auth and redirect
+      localStorage.removeItem("token");
+      window.location.href = "/login";
+    } catch (err) {
+      if (err instanceof ApiError) {
+        showApiError(err);
+      } else {
+        showError("Failed to delete organization");
+      }
       setDeleting(false);
       setShowDeleteOrg(false);
       setDeleteConfirmText("");
-    }, 1500);
+    }
   };
 
-  const usagePercent = Math.round((mockOrg.events_used / mockOrg.events_limit) * 100);
+  const plan = orgData?.plan || orgUsage?.plan || "free";
+  const planLabel = planLabels[plan] || plan;
+  const memberCount = orgUsage?.member_count ?? 0;
+  const eventsLimit = orgUsage?.events_limit ?? 100000;
+  // Events used is not yet tracked in the backend -- show 0 for now
+  const eventsUsed = 0;
+  const usagePercent = eventsLimit > 0 ? Math.round((eventsUsed / eventsLimit) * 100) : 0;
+  const createdAt = orgData?.created_at || orgUsage?.created_at || "";
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <div className="h-6 w-48 bg-[var(--bg-hover)] rounded animate-pulse" />
+          <div className="h-4 w-80 bg-[var(--bg-hover)] rounded animate-pulse mt-2" />
+        </div>
+        {[1, 2, 3, 4].map((i) => (
+          <div
+            key={i}
+            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6"
+          >
+            <div className="h-5 w-40 bg-[var(--bg-hover)] rounded animate-pulse mb-4" />
+            <div className="h-10 w-full bg-[var(--bg-hover)] rounded animate-pulse" />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <motion.div
@@ -158,7 +272,7 @@ export default function SettingsPage() {
               </label>
               <div className="flex items-center gap-4">
                 <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-[var(--accent-blue)] to-[var(--accent-purple)] flex items-center justify-center text-white text-2xl font-bold">
-                  {orgName.charAt(0)}
+                  {orgName.charAt(0) || "?"}
                 </div>
                 <div>
                   <Button variant="outline" size="sm">
@@ -220,20 +334,25 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between p-4 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-subtle)] mb-5">
             <div className="flex items-center gap-3">
               <Badge
-                className={`${planColors[mockOrg.plan]} border-0 text-xs font-semibold`}
+                className={`${planColors[plan] || planColors.free} border-0 text-xs font-semibold`}
               >
-                {mockOrg.plan}
+                {planLabel}
               </Badge>
               <div>
                 <p className="text-sm text-[var(--text-primary)] font-medium">
-                  {mockOrg.plan} Plan
+                  {planLabel} Plan
                 </p>
                 <p className="text-xs text-[var(--text-tertiary)]">
-                  {planPrices[mockOrg.plan]} &middot; {mockOrg.member_count} members &middot; Since{" "}
-                  {new Date(mockOrg.created_at).toLocaleDateString("en-US", {
-                    month: "short",
-                    year: "numeric",
-                  })}
+                  {planPrices[plan] || "Free"} &middot; {memberCount} member{memberCount !== 1 ? "s" : ""}
+                  {createdAt ? (
+                    <>
+                      {" "}&middot; Since{" "}
+                      {new Date(createdAt).toLocaleDateString("en-US", {
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </>
+                  ) : null}
                 </p>
               </div>
             </div>
@@ -250,8 +369,8 @@ export default function SettingsPage() {
                 <span className="text-sm text-[var(--text-primary)]">Events this month</span>
               </div>
               <span className="text-sm text-[var(--text-secondary)] tabular-nums">
-                {(mockOrg.events_used / 1000).toFixed(0)}K{" "}
-                <span className="text-[var(--text-tertiary)]">/ {(mockOrg.events_limit / 1000000).toFixed(0)}M</span>
+                {(eventsUsed / 1000).toFixed(0)}K{" "}
+                <span className="text-[var(--text-tertiary)]">/ {eventsLimit >= 1000000 ? `${(eventsLimit / 1000000).toFixed(0)}M` : `${(eventsLimit / 1000).toFixed(0)}K`}</span>
               </span>
             </div>
             <div className="h-2 rounded-full bg-[var(--bg-primary)] overflow-hidden border border-[var(--border-subtle)]">
@@ -396,7 +515,7 @@ export default function SettingsPage() {
           <Button onClick={handleSave} disabled={saving}>
             {saving ? (
               <span className="flex items-center gap-2">
-                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 Saving...
               </span>
             ) : (
@@ -470,11 +589,11 @@ export default function SettingsPage() {
           <div className="space-y-4">
             <div className="p-3 rounded-lg bg-[var(--accent-red)]/5 border border-[var(--accent-red)]/10">
               <p className="text-xs text-[var(--text-secondary)]">
-                To confirm, type <span className="font-mono font-semibold text-[var(--accent-red)]">{mockOrg.slug}</span> below:
+                To confirm, type <span className="font-mono font-semibold text-[var(--accent-red)]">{orgData?.slug || ""}</span> below:
               </p>
             </div>
             <Input
-              placeholder={mockOrg.slug}
+              placeholder={orgData?.slug || ""}
               value={deleteConfirmText}
               onChange={(e) => setDeleteConfirmText(e.target.value)}
               className="bg-[var(--bg-primary)] border-[var(--border-default)] font-mono"
@@ -488,11 +607,11 @@ export default function SettingsPage() {
             <Button
               variant="destructive"
               onClick={handleDeleteOrg}
-              disabled={deleteConfirmText !== mockOrg.slug || deleting}
+              disabled={!orgData || deleteConfirmText !== orgData.slug || deleting}
             >
               {deleting ? (
                 <span className="flex items-center gap-2">
-                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   Deleting...
                 </span>
               ) : (
