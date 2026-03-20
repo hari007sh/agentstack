@@ -468,8 +468,8 @@ describe('Healing Engine', () => {
 
 describe('Type Exports', () => {
   test('enums are accessible', () => {
-    expect(SpanType.LLM).toBe('llm');
-    expect(SpanType.TOOL).toBe('tool');
+    expect(SpanType.LLM).toBe('llm_call');
+    expect(SpanType.TOOL).toBe('tool_call');
     expect(SpanType.RETRIEVAL).toBe('retrieval');
     expect(SpanType.CHAIN).toBe('chain');
     expect(SpanType.AGENT).toBe('agent');
