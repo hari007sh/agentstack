@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
+import { useRouter, useParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -18,228 +18,25 @@ import {
   CheckCircle2,
   XCircle,
   Timer,
+  RefreshCw,
 } from "lucide-react";
 import { fadeIn, staggerContainer, staggerItem } from "@/lib/animations";
 import { SkeletonBlock } from "@/components/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { api, ApiError } from "@/lib/api";
 import type { Session, Span } from "@/lib/types";
 
-// --- Mock Data ---
-const mockSession: Session = {
-  id: "ses_a1b2c3d4",
-  org_id: "org_1",
-  agent_name: "Research Agent",
-  agent_id: "agent_1",
-  status: "completed",
-  input: "Find papers on transformer architectures published in 2024",
-  output: "Found 12 relevant papers on transformer architectures...",
-  error: "",
-  metadata: { framework: "crewai" },
-  total_tokens: 8420,
-  total_cost_cents: 15,
-  total_spans: 5,
-  duration_ms: 4200,
-  has_healing: false,
-  tags: ["research"],
-  started_at: "2025-03-20T10:00:00Z",
-  ended_at: "2025-03-20T10:00:04Z",
-  created_at: "2025-03-20T10:00:00Z",
-};
-
-const mockSpans: Span[] = [
-  {
-    id: "span_001",
-    session_id: "ses_a1b2c3d4",
-    parent_id: "",
-    name: "research_agent.run",
-    span_type: "agent",
-    status: "completed",
-    input: "Find papers on transformer architectures",
-    output: "Found 12 papers",
-    error: "",
-    model: "",
-    provider: "",
-    input_tokens: 0,
-    output_tokens: 0,
-    total_tokens: 8420,
-    cost_cents: 15,
-    duration_ms: 4200,
-    metadata: {},
-    started_at: "2025-03-20T10:00:00.000Z",
-    ended_at: "2025-03-20T10:00:04.200Z",
-  },
-  {
-    id: "span_002",
-    session_id: "ses_a1b2c3d4",
-    parent_id: "span_001",
-    name: "plan_search_strategy",
-    span_type: "llm_call",
-    status: "completed",
-    input: "Plan the search strategy for finding papers",
-    output: "I will search across arxiv, semantic scholar...",
-    error: "",
-    model: "gpt-4o",
-    provider: "openai",
-    input_tokens: 420,
-    output_tokens: 380,
-    total_tokens: 800,
-    cost_cents: 3,
-    duration_ms: 1100,
-    metadata: {},
-    started_at: "2025-03-20T10:00:00.100Z",
-    ended_at: "2025-03-20T10:00:01.200Z",
-  },
-  {
-    id: "span_003",
-    session_id: "ses_a1b2c3d4",
-    parent_id: "span_001",
-    name: "search_arxiv",
-    span_type: "tool_call",
-    status: "completed",
-    input: '{"query": "transformer architectures 2024"}',
-    output: '{"results": 8}',
-    error: "",
-    model: "",
-    provider: "",
-    input_tokens: 0,
-    output_tokens: 0,
-    total_tokens: 0,
-    cost_cents: 0,
-    duration_ms: 800,
-    metadata: {},
-    started_at: "2025-03-20T10:00:01.300Z",
-    ended_at: "2025-03-20T10:00:02.100Z",
-  },
-  {
-    id: "span_004",
-    session_id: "ses_a1b2c3d4",
-    parent_id: "span_001",
-    name: "search_semantic_scholar",
-    span_type: "tool_call",
-    status: "completed",
-    input: '{"query": "transformer architectures 2024"}',
-    output: '{"results": 6}',
-    error: "",
-    model: "",
-    provider: "",
-    input_tokens: 0,
-    output_tokens: 0,
-    total_tokens: 0,
-    cost_cents: 0,
-    duration_ms: 650,
-    metadata: {},
-    started_at: "2025-03-20T10:00:01.300Z",
-    ended_at: "2025-03-20T10:00:01.950Z",
-  },
-  {
-    id: "span_005",
-    session_id: "ses_a1b2c3d4",
-    parent_id: "span_001",
-    name: "retrieve_paper_details",
-    span_type: "retrieval",
-    status: "completed",
-    input: "Fetch details for 14 papers",
-    output: "Retrieved 12 valid papers with abstracts",
-    error: "",
-    model: "",
-    provider: "",
-    input_tokens: 0,
-    output_tokens: 0,
-    total_tokens: 0,
-    cost_cents: 0,
-    duration_ms: 400,
-    metadata: {},
-    started_at: "2025-03-20T10:00:02.200Z",
-    ended_at: "2025-03-20T10:00:02.600Z",
-  },
-  {
-    id: "span_006",
-    session_id: "ses_a1b2c3d4",
-    parent_id: "span_001",
-    name: "synthesize_results",
-    span_type: "llm_call",
-    status: "completed",
-    input: "Summarize and rank the 12 papers found",
-    output: "Here are the top papers on transformer architectures in 2024...",
-    error: "",
-    model: "gpt-4o",
-    provider: "openai",
-    input_tokens: 3200,
-    output_tokens: 1800,
-    total_tokens: 5000,
-    cost_cents: 10,
-    duration_ms: 1400,
-    metadata: {},
-    started_at: "2025-03-20T10:00:02.700Z",
-    ended_at: "2025-03-20T10:00:04.100Z",
-  },
-  {
-    id: "span_007",
-    session_id: "ses_a1b2c3d4",
-    parent_id: "span_006",
-    name: "format_citations",
-    span_type: "chain",
-    status: "completed",
-    input: "Format citations for 12 papers",
-    output: "Citations formatted in APA style",
-    error: "",
-    model: "",
-    provider: "",
-    input_tokens: 420,
-    output_tokens: 200,
-    total_tokens: 620,
-    cost_cents: 2,
-    duration_ms: 300,
-    metadata: {},
-    started_at: "2025-03-20T10:00:03.700Z",
-    ended_at: "2025-03-20T10:00:04.000Z",
-  },
-];
-
-const mockEvents = [
-  {
-    id: "evt_1",
-    type: "session_start",
-    message: "Session started for Research Agent",
-    timestamp: "2025-03-20T10:00:00.000Z",
-  },
-  {
-    id: "evt_2",
-    type: "span_start",
-    message: "Agent span research_agent.run started",
-    timestamp: "2025-03-20T10:00:00.050Z",
-  },
-  {
-    id: "evt_3",
-    type: "llm_request",
-    message: "LLM call to gpt-4o (plan_search_strategy)",
-    timestamp: "2025-03-20T10:00:00.100Z",
-  },
-  {
-    id: "evt_4",
-    type: "tool_invocation",
-    message: "Tool calls: search_arxiv, search_semantic_scholar (parallel)",
-    timestamp: "2025-03-20T10:00:01.300Z",
-  },
-  {
-    id: "evt_5",
-    type: "retrieval",
-    message: "Retrieved 12 paper details from database",
-    timestamp: "2025-03-20T10:00:02.200Z",
-  },
-  {
-    id: "evt_6",
-    type: "llm_request",
-    message: "LLM call to gpt-4o (synthesize_results)",
-    timestamp: "2025-03-20T10:00:02.700Z",
-  },
-  {
-    id: "evt_7",
-    type: "session_end",
-    message: "Session completed successfully (4.2s)",
-    timestamp: "2025-03-20T10:00:04.200Z",
-  },
-];
+// Backend event shape from ClickHouse store
+interface SessionEvent {
+  id: string;
+  session_id: string;
+  span_id?: string;
+  org_id: string;
+  type: string;
+  name: string;
+  data: string;
+  created_at: string;
+}
 
 const statusColors: Record<string, string> = {
   completed: "var(--accent-green)",
@@ -303,20 +100,71 @@ function formatTimestamp(ts: string): string {
 
 export default function SessionDetailPage() {
   const router = useRouter();
+  const params = useParams();
+  const sessionId = params.id as string;
+
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [spans, setSpans] = useState<Span[]>([]);
+  const [events, setEvents] = useState<SessionEvent[]>([]);
+
+  const fetchData = useCallback(async () => {
+    if (!sessionId) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const token =
+        typeof window !== "undefined"
+          ? localStorage.getItem("token")
+          : null;
+      if (token) {
+        api.setToken(token);
+      }
+
+      const [sessionRes, spansRes, eventsRes] = await Promise.all([
+        api.get<Session>(`/v1/sessions/${sessionId}`),
+        api.get<{ spans: Span[] }>(`/v1/sessions/${sessionId}/spans`),
+        api.get<{ events: SessionEvent[] }>(
+          `/v1/sessions/${sessionId}/events`
+        ),
+      ]);
+
+      setSession(sessionRes);
+      setSpans(spansRes.spans ?? []);
+      setEvents(eventsRes.events ?? []);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        if (err.status === 404) {
+          setError("Session not found.");
+        } else {
+          setError(err.message || "Failed to load session.");
+        }
+      } else {
+        setError("An unexpected error occurred.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [sessionId]);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 600);
-    return () => clearTimeout(timer);
-  }, []);
+    fetchData();
+  }, [fetchData]);
 
-  const session = mockSession;
-  const maxDuration = session.duration_ms;
+  const maxDuration = session?.duration_ms ?? 0;
 
   // Order spans by start time
-  const orderedSpans = [...mockSpans].sort(
+  const orderedSpans = [...spans].sort(
     (a, b) =>
       new Date(a.started_at).getTime() - new Date(b.started_at).getTime()
+  );
+
+  // Order events by timestamp
+  const orderedEvents = [...events].sort(
+    (a, b) =>
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   );
 
   return (
@@ -364,7 +212,27 @@ export default function SessionDetailPage() {
         </div>
       )}
 
-      {!loading && (
+      {/* Error State */}
+      {!loading && error && (
+        <div className="rounded-xl border border-[var(--accent-red)]/20 bg-[var(--accent-red)]/5 p-6">
+          <div className="flex items-center gap-3 mb-3">
+            <AlertCircle className="w-5 h-5 text-[var(--accent-red)]" />
+            <h3 className="text-sm font-medium text-[var(--accent-red)]">
+              Failed to load session
+            </h3>
+          </div>
+          <p className="text-sm text-[var(--text-secondary)] mb-4">{error}</p>
+          <button
+            onClick={fetchData}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-sm font-medium hover:bg-[var(--bg-hover)] transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && session && (
         <>
           {/* Session Metadata Header */}
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6">
@@ -451,109 +319,121 @@ export default function SessionDetailPage() {
               <h3 className="text-sm font-medium">Span Timeline</h3>
             </div>
 
-            <motion.div
-              variants={staggerContainer}
-              initial="hidden"
-              animate="visible"
-            >
-              {orderedSpans.map((span) => {
-                const depth = getDepth(span, orderedSpans);
-                const SpanTypeIcon = spanTypeIcons[span.span_type] || Zap;
-                const StatusIcon = spanStatusIcons[span.status] || CheckCircle2;
-                const barWidth =
-                  maxDuration > 0
-                    ? Math.max(4, (span.duration_ms / maxDuration) * 100)
-                    : 4;
+            {orderedSpans.length === 0 ? (
+              <div className="p-12 text-center">
+                <div className="w-10 h-10 rounded-xl bg-[var(--accent-purple)]/10 flex items-center justify-center mx-auto mb-3">
+                  <Cpu className="w-5 h-5 text-[var(--accent-purple)]" />
+                </div>
+                <p className="text-sm text-[var(--text-secondary)]">
+                  No spans recorded for this session.
+                </p>
+              </div>
+            ) : (
+              <motion.div
+                variants={staggerContainer}
+                initial="hidden"
+                animate="visible"
+              >
+                {orderedSpans.map((span) => {
+                  const depth = getDepth(span, orderedSpans);
+                  const SpanTypeIcon = spanTypeIcons[span.span_type] || Zap;
+                  const StatusIcon =
+                    spanStatusIcons[span.status] || CheckCircle2;
+                  const barWidth =
+                    maxDuration > 0
+                      ? Math.max(4, (span.duration_ms / maxDuration) * 100)
+                      : 4;
 
-                return (
-                  <motion.div
-                    key={span.id}
-                    variants={staggerItem}
-                    className="flex items-center gap-3 px-5 py-3 border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors"
-                  >
-                    {/* Indentation */}
-                    <div
-                      style={{ width: depth * 24 }}
-                      className="flex-shrink-0"
-                    />
-
-                    {/* Type Icon */}
-                    <div
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${spanTypeColors[span.span_type]}`}
+                  return (
+                    <motion.div
+                      key={span.id}
+                      variants={staggerItem}
+                      className="flex items-center gap-3 px-5 py-3 border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors"
                     >
-                      <SpanTypeIcon className="w-3.5 h-3.5" />
-                    </div>
-
-                    {/* Name + Type Badge */}
-                    <div className="min-w-0 flex-shrink-0 w-48">
-                      <p className="text-sm font-medium truncate">
-                        {span.name}
-                      </p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] px-1.5 py-0 h-4 border-[var(--border-subtle)]"
-                        >
-                          {span.span_type.replace("_", " ")}
-                        </Badge>
-                        {span.model && (
-                          <span className="text-[10px] text-[var(--text-tertiary)]">
-                            {span.model}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Status */}
-                    <div className="flex items-center gap-1.5 flex-shrink-0 w-24">
-                      <StatusIcon
-                        className="w-3.5 h-3.5"
-                        style={{
-                          color:
-                            span.status === "completed"
-                              ? "var(--accent-green)"
-                              : span.status === "failed"
-                              ? "var(--accent-red)"
-                              : span.status === "running"
-                              ? "var(--accent-blue)"
-                              : "var(--accent-amber)",
-                        }}
+                      {/* Indentation */}
+                      <div
+                        style={{ width: depth * 24 }}
+                        className="flex-shrink-0"
                       />
-                      <span className="text-xs capitalize text-[var(--text-secondary)]">
-                        {span.status}
-                      </span>
-                    </div>
 
-                    {/* Duration Bar */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 h-2 rounded-full bg-[var(--bg-hover)] overflow-hidden">
-                          <div
-                            className="h-full rounded-full transition-all"
-                            style={{
-                              width: `${barWidth}%`,
-                              backgroundColor:
-                                span.span_type === "llm_call"
-                                  ? "var(--accent-purple)"
-                                  : span.span_type === "tool_call"
-                                  ? "var(--accent-amber)"
-                                  : span.span_type === "agent"
-                                  ? "var(--accent-blue)"
-                                  : span.span_type === "retrieval"
-                                  ? "var(--accent-green)"
-                                  : "var(--healing-blue)",
-                            }}
-                          />
+                      {/* Type Icon */}
+                      <div
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${spanTypeColors[span.span_type]}`}
+                      >
+                        <SpanTypeIcon className="w-3.5 h-3.5" />
+                      </div>
+
+                      {/* Name + Type Badge */}
+                      <div className="min-w-0 flex-shrink-0 w-48">
+                        <p className="text-sm font-medium truncate">
+                          {span.name}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-1.5 py-0 h-4 border-[var(--border-subtle)]"
+                          >
+                            {span.span_type.replace("_", " ")}
+                          </Badge>
+                          {span.model && (
+                            <span className="text-[10px] text-[var(--text-tertiary)]">
+                              {span.model}
+                            </span>
+                          )}
                         </div>
-                        <span className="text-xs text-[var(--text-tertiary)] w-14 text-right flex-shrink-0">
-                          {formatDuration(span.duration_ms)}
+                      </div>
+
+                      {/* Status */}
+                      <div className="flex items-center gap-1.5 flex-shrink-0 w-24">
+                        <StatusIcon
+                          className="w-3.5 h-3.5"
+                          style={{
+                            color:
+                              span.status === "completed"
+                                ? "var(--accent-green)"
+                                : span.status === "failed"
+                                ? "var(--accent-red)"
+                                : span.status === "running"
+                                ? "var(--accent-blue)"
+                                : "var(--accent-amber)",
+                          }}
+                        />
+                        <span className="text-xs capitalize text-[var(--text-secondary)]">
+                          {span.status}
                         </span>
                       </div>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </motion.div>
+
+                      {/* Duration Bar */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-2 rounded-full bg-[var(--bg-hover)] overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${barWidth}%`,
+                                backgroundColor:
+                                  span.span_type === "llm_call"
+                                    ? "var(--accent-purple)"
+                                    : span.span_type === "tool_call"
+                                    ? "var(--accent-amber)"
+                                    : span.span_type === "agent"
+                                    ? "var(--accent-blue)"
+                                    : span.span_type === "retrieval"
+                                    ? "var(--accent-green)"
+                                    : "var(--healing-blue)",
+                              }}
+                            />
+                          </div>
+                          <span className="text-xs text-[var(--text-tertiary)] w-14 text-right flex-shrink-0">
+                            {formatDuration(span.duration_ms)}
+                          </span>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </motion.div>
+            )}
           </div>
 
           {/* Events Timeline */}
@@ -561,28 +441,50 @@ export default function SessionDetailPage() {
             <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
               <h3 className="text-sm font-medium">Events</h3>
             </div>
-            <div className="p-5">
-              <div className="relative">
-                {/* Timeline line */}
-                <div className="absolute left-[7px] top-2 bottom-2 w-px bg-[var(--border-subtle)]" />
 
-                <div className="space-y-4">
-                  {mockEvents.map((event) => (
-                    <div key={event.id} className="flex items-start gap-3 relative">
-                      <div className="w-[15px] h-[15px] rounded-full border-2 border-[var(--border-default)] bg-[var(--bg-elevated)] flex-shrink-0 mt-0.5 z-10" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-[var(--text-secondary)]">
-                          {event.message}
-                        </p>
-                        <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5 font-mono">
-                          {formatTimestamp(event.timestamp)}
-                        </p>
+            {orderedEvents.length === 0 ? (
+              <div className="p-12 text-center">
+                <div className="w-10 h-10 rounded-xl bg-[var(--accent-blue)]/10 flex items-center justify-center mx-auto mb-3">
+                  <Zap className="w-5 h-5 text-[var(--accent-blue)]" />
+                </div>
+                <p className="text-sm text-[var(--text-secondary)]">
+                  No events recorded for this session.
+                </p>
+              </div>
+            ) : (
+              <div className="p-5">
+                <div className="relative">
+                  {/* Timeline line */}
+                  <div className="absolute left-[7px] top-2 bottom-2 w-px bg-[var(--border-subtle)]" />
+
+                  <div className="space-y-4">
+                    {orderedEvents.map((event) => (
+                      <div
+                        key={event.id}
+                        className="flex items-start gap-3 relative"
+                      >
+                        <div className="w-[15px] h-[15px] rounded-full border-2 border-[var(--border-default)] bg-[var(--bg-elevated)] flex-shrink-0 mt-0.5 z-10" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-[var(--text-secondary)]">
+                            <span className="text-[var(--text-primary)] font-medium">
+                              {event.name || event.type}
+                            </span>
+                            {event.data && (
+                              <span className="ml-2 text-[var(--text-tertiary)]">
+                                {event.data}
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-[10px] text-[var(--text-tertiary)] mt-0.5 font-mono">
+                            {formatTimestamp(event.created_at)}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </>
       )}

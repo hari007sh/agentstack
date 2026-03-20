@@ -7,20 +7,25 @@ import (
 	"net/http"
 	"time"
 
+	costservice "github.com/agentstack/agentstack/internal/cost/service"
+	coststore "github.com/agentstack/agentstack/internal/cost/store"
 	"github.com/agentstack/agentstack/internal/route/provider"
 	"github.com/agentstack/agentstack/internal/route/store"
 )
 
 // Proxy is the core gateway proxy handler.
 // It receives OpenAI-compatible requests, resolves the provider and model via
-// routing rules, checks the semantic cache, forwards to the provider, logs the
-// request asynchronously, and returns the response.
+// routing rules, checks budgets, checks the semantic cache, forwards to the
+// provider, records cost events, logs the request asynchronously, and returns
+// the response.
 type Proxy struct {
-	router   *Router
-	cache    *SemanticCache
-	fallback *FallbackExecutor
-	logger   *AsyncLogger
-	log      *slog.Logger
+	router        *Router
+	cache         *SemanticCache
+	fallback      *FallbackExecutor
+	logger        *AsyncLogger
+	log           *slog.Logger
+	budgetService *costservice.BudgetService
+	costTracker   *costservice.TrackerService
 }
 
 // NewProxy creates a new gateway proxy.
@@ -32,6 +37,16 @@ func NewProxy(router *Router, cache *SemanticCache, fallback *FallbackExecutor, 
 		logger:   asyncLogger,
 		log:      logger,
 	}
+}
+
+// SetBudgetService configures budget enforcement on the proxy.
+func (p *Proxy) SetBudgetService(bs *costservice.BudgetService) {
+	p.budgetService = bs
+}
+
+// SetCostTracker configures cost event recording on the proxy.
+func (p *Proxy) SetCostTracker(ct *costservice.TrackerService) {
+	p.costTracker = ct
 }
 
 // HandleChatCompletion handles POST /v1/chat/completions.
@@ -54,7 +69,29 @@ func (p *Proxy) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Check semantic cache
+	// 1. Check budget enforcement
+	if p.budgetService != nil {
+		budgetResult, err := p.budgetService.CheckBudget(r.Context(), orgID, "", req.Model)
+		if err != nil {
+			p.log.Error("budget check failed", "org_id", orgID, "error", err)
+			// Budget check errors are non-fatal; log and proceed
+		} else if !budgetResult.Allowed {
+			p.logRequest(orgID, req.Model, "", "", 0, 0, 0, int(time.Since(start).Milliseconds()), false, "budget_blocked", strPtr(budgetResult.Message))
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error": map[string]interface{}{
+					"code":    "BUDGET_EXCEEDED",
+					"message": "Your cost budget has been exceeded",
+				},
+			})
+			return
+		} else if budgetResult.Action == "throttle" {
+			w.Header().Set("X-AgentStack-Budget-Warning", "approaching limit")
+		}
+	}
+
+	// 2. Check semantic cache
 	cacheDisabled := r.Header.Get("X-AgentStack-Cache") == "false"
 	if !cacheDisabled && p.cache != nil && !req.Stream {
 		cached, hit, err := p.cache.Get(r.Context(), orgID, &req)
@@ -66,7 +103,7 @@ func (p *Proxy) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2. Route to provider
+	// 3. Route to provider
 	result, err := p.router.MatchRoute(r.Context(), orgID, req.Model)
 	if err != nil {
 		p.logRequest(orgID, req.Model, "", "", 0, 0, 0, int(time.Since(start).Milliseconds()), false, "error", strPtr(err.Error()))
@@ -82,13 +119,13 @@ func (p *Proxy) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-AgentStack-Model", result.TargetModel)
 	w.Header().Set("X-AgentStack-Cache-Hit", "false")
 
-	// 3. Streaming request
+	// 4. Streaming request
 	if req.Stream {
 		p.handleStream(w, r, orgID, originalModel, result, &req, start)
 		return
 	}
 
-	// 4. Non-streaming request
+	// 5. Non-streaming request
 	resp, err := result.Adapter.ChatCompletion(r.Context(), &req)
 	if err != nil {
 		p.logRequest(orgID, originalModel, result.TargetModel, result.ProviderName, 0, 0, 0, int(time.Since(start).Milliseconds()), false, "error", strPtr(err.Error()))
@@ -103,15 +140,19 @@ func (p *Proxy) HandleChatCompletion(w http.ResponseWriter, r *http.Request) {
 		tokensOut = resp.Usage.CompletionTokens
 	}
 
-	// 5. Store in cache
+	// 6. Record cost event (async, non-blocking)
+	p.recordCostEvent(r.Context(), orgID, originalModel, result.ProviderName, tokensIn, tokensOut)
+
+	// 7. Store in cache
 	if !cacheDisabled && p.cache != nil {
 		reqForCache := req
 		reqForCache.Model = originalModel
 		_ = p.cache.Set(r.Context(), orgID, &reqForCache, resp)
 	}
 
-	// 6. Async log
-	p.logRequest(orgID, originalModel, result.TargetModel, result.ProviderName, tokensIn, tokensOut, 0, latencyMs, false, "success", nil)
+	// 8. Async log
+	costCents := p.estimateCost(r.Context(), result.ProviderName, result.TargetModel, tokensIn, tokensOut)
+	p.logRequest(orgID, originalModel, result.TargetModel, result.ProviderName, tokensIn, tokensOut, costCents, latencyMs, false, "success", nil)
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -153,6 +194,40 @@ func (p *Proxy) handleStream(w http.ResponseWriter, r *http.Request, orgID, orig
 
 	latencyMs := int(time.Since(start).Milliseconds())
 	p.logRequest(orgID, originalModel, result.TargetModel, result.ProviderName, 0, 0, 0, latencyMs, false, "success", nil)
+}
+
+// recordCostEvent asynchronously records a cost event for a completed request.
+// Errors are logged but never fail the request.
+func (p *Proxy) recordCostEvent(ctx context.Context, orgID, model, providerName string, tokensIn, tokensOut int) {
+	if p.costTracker == nil {
+		return
+	}
+	go func() {
+		event := &coststore.CostEvent{
+			AgentName:    "", // gateway does not have agent context
+			Model:        model,
+			Provider:     providerName,
+			InputTokens:  tokensIn,
+			OutputTokens: tokensOut,
+			Outcome:      "success",
+		}
+		if err := p.costTracker.RecordEvent(ctx, orgID, event); err != nil {
+			p.log.Error("failed to record cost event", "org_id", orgID, "model", model, "error", err)
+		}
+	}()
+}
+
+// estimateCost returns the estimated cost in cents for a request.
+// Returns 0 if cost tracker is not configured or pricing is unavailable.
+func (p *Proxy) estimateCost(ctx context.Context, providerName, model string, tokensIn, tokensOut int) int64 {
+	if p.costTracker == nil {
+		return 0
+	}
+	cost, err := p.costTracker.CalculateCost(ctx, model, providerName, tokensIn, tokensOut)
+	if err != nil {
+		return 0
+	}
+	return int64(cost)
 }
 
 // HandleEmbeddings handles POST /v1/embeddings (pass-through to provider).
