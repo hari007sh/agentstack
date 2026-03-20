@@ -128,7 +128,7 @@ curl -X POST http://localhost:8080/auth/github
 }
 ```
 
-### GET /auth/github/callback?code={code}
+### GET /auth/github/callback?code=\{code\}
 
 Exchange a GitHub authorization code for a JWT token. On first login, creates a new organization, user, and default API key.
 
@@ -293,19 +293,19 @@ curl -H "Authorization: Bearer as_sk_..." \
   "http://localhost:8080/v1/sessions?limit=20&offset=0"
 ```
 
-### GET /v1/sessions/{id}
+### GET /v1/sessions/\{id\}
 
 Get a single session by ID.
 
-### GET /v1/sessions/{id}/spans
+### GET /v1/sessions/\{id\}/spans
 
 Get all spans for a session.
 
-### GET /v1/sessions/{id}/events
+### GET /v1/sessions/\{id\}/events
 
 Get all events for a session.
 
-### GET /v1/sessions/{id}/healing
+### GET /v1/sessions/\{id\}/healing
 
 Get all healing events for a session.
 
@@ -344,9 +344,9 @@ CRUD operations for agent definitions.
 |--------|------|-------------|
 | GET | `/v1/agents` | List agents |
 | POST | `/v1/agents` | Create an agent |
-| GET | `/v1/agents/{id}` | Get an agent |
-| PUT | `/v1/agents/{id}` | Update an agent |
-| DELETE | `/v1/agents/{id}` | Delete an agent |
+| GET | `/v1/agents/\{id\}` | Get an agent |
+| PUT | `/v1/agents/\{id\}` | Update an agent |
+| DELETE | `/v1/agents/\{id\}` | Delete an agent |
 
 ---
 
@@ -358,9 +358,9 @@ CRUD operations for failure pattern definitions.
 |--------|------|-------------|
 | GET | `/v1/patterns` | List patterns |
 | POST | `/v1/patterns` | Create a pattern |
-| GET | `/v1/patterns/{id}` | Get a pattern |
-| PUT | `/v1/patterns/{id}` | Update a pattern |
-| DELETE | `/v1/patterns/{id}` | Delete a pattern |
+| GET | `/v1/patterns/\{id\}` | Get a pattern |
+| PUT | `/v1/patterns/\{id\}` | Update a pattern |
+| DELETE | `/v1/patterns/\{id\}` | Delete a pattern |
 
 ---
 
@@ -372,9 +372,9 @@ CRUD operations for alert rules.
 |--------|------|-------------|
 | GET | `/v1/alerts` | List alert rules |
 | POST | `/v1/alerts` | Create an alert rule |
-| GET | `/v1/alerts/{id}` | Get an alert rule |
-| PUT | `/v1/alerts/{id}` | Update an alert rule |
-| DELETE | `/v1/alerts/{id}` | Delete an alert rule |
+| GET | `/v1/alerts/\{id\}` | Get an alert rule |
+| PUT | `/v1/alerts/\{id\}` | Update an alert rule |
+| DELETE | `/v1/alerts/\{id\}` | Delete an alert rule |
 
 ---
 
@@ -386,27 +386,27 @@ CRUD operations for alert rules.
 |--------|------|-------------|
 | GET | `/v1/test/suites` | List test suites |
 | POST | `/v1/test/suites` | Create a test suite |
-| GET | `/v1/test/suites/{id}` | Get a test suite |
-| PUT | `/v1/test/suites/{id}` | Update a test suite |
-| DELETE | `/v1/test/suites/{id}` | Delete a test suite |
+| GET | `/v1/test/suites/\{id\}` | Get a test suite |
+| PUT | `/v1/test/suites/\{id\}` | Update a test suite |
+| DELETE | `/v1/test/suites/\{id\}` | Delete a test suite |
 
 ### Test Cases
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/v1/test/suites/{suiteId}/cases` | List cases in a suite |
-| POST | `/v1/test/suites/{suiteId}/cases` | Create a test case |
-| GET | `/v1/test/cases/{id}` | Get a test case |
-| PUT | `/v1/test/cases/{id}` | Update a test case |
-| DELETE | `/v1/test/cases/{id}` | Delete a test case |
+| GET | `/v1/test/suites/\{suiteId\}/cases` | List cases in a suite |
+| POST | `/v1/test/suites/\{suiteId\}/cases` | Create a test case |
+| GET | `/v1/test/cases/\{id\}` | Get a test case |
+| PUT | `/v1/test/cases/\{id\}` | Update a test case |
+| DELETE | `/v1/test/cases/\{id\}` | Delete a test case |
 
 ### Test Runs
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/v1/test/runs` | List test runs |
-| GET | `/v1/test/runs/{id}` | Get a test run (with results) |
-| POST | `/v1/test/suites/{suiteId}/run` | Start a test run for a suite |
+| GET | `/v1/test/runs/\{id\}` | Get a test run (with results) |
+| POST | `/v1/test/suites/\{suiteId\}/run` | Start a test run for a suite |
 | POST | `/v1/test/ci/run` | CI/CD endpoint -- run tests and return pass/fail |
 
 ### Evaluators
@@ -415,9 +415,9 @@ CRUD operations for alert rules.
 |--------|------|-------------|
 | GET | `/v1/test/evaluators` | List evaluators |
 | POST | `/v1/test/evaluators` | Create an evaluator |
-| GET | `/v1/test/evaluators/{id}` | Get an evaluator |
-| PUT | `/v1/test/evaluators/{id}` | Update an evaluator |
-| DELETE | `/v1/test/evaluators/{id}` | Delete an evaluator |
+| GET | `/v1/test/evaluators/\{id\}` | Get an evaluator |
+| PUT | `/v1/test/evaluators/\{id\}` | Update an evaluator |
+| DELETE | `/v1/test/evaluators/\{id\}` | Delete an evaluator |
 
 ---
 
@@ -452,9 +452,9 @@ curl -X POST http://localhost:8080/v1/guard/check \
 |--------|------|-------------|
 | GET | `/v1/guard/rules` | List guardrail rules |
 | POST | `/v1/guard/rules` | Create a guardrail rule |
-| GET | `/v1/guard/rules/{id}` | Get a guardrail rule |
-| PUT | `/v1/guard/rules/{id}` | Update a guardrail rule |
-| DELETE | `/v1/guard/rules/{id}` | Delete a guardrail rule |
+| GET | `/v1/guard/rules/\{id\}` | Get a guardrail rule |
+| PUT | `/v1/guard/rules/\{id\}` | Update a guardrail rule |
+| DELETE | `/v1/guard/rules/\{id\}` | Delete a guardrail rule |
 
 ### Guard Events and Analytics
 
@@ -521,9 +521,9 @@ List cost events.
 |--------|------|-------------|
 | GET | `/v1/cost/budgets` | List budget policies |
 | POST | `/v1/cost/budgets` | Create a budget policy |
-| GET | `/v1/cost/budgets/{id}` | Get a budget policy |
-| PUT | `/v1/cost/budgets/{id}` | Update a budget policy |
-| DELETE | `/v1/cost/budgets/{id}` | Delete a budget policy |
+| GET | `/v1/cost/budgets/\{id\}` | Get a budget policy |
+| PUT | `/v1/cost/budgets/\{id\}` | Update a budget policy |
+| DELETE | `/v1/cost/budgets/\{id\}` | Delete a budget policy |
 
 ### Model Pricing
 
@@ -542,9 +542,9 @@ List cost events.
 |--------|------|-------------|
 | GET | `/v1/gateway/providers` | List LLM providers |
 | POST | `/v1/gateway/providers` | Add a provider (API key encrypted with AES-256-GCM) |
-| GET | `/v1/gateway/providers/{id}` | Get a provider |
-| PUT | `/v1/gateway/providers/{id}` | Update a provider |
-| DELETE | `/v1/gateway/providers/{id}` | Delete a provider |
+| GET | `/v1/gateway/providers/\{id\}` | Get a provider |
+| PUT | `/v1/gateway/providers/\{id\}` | Update a provider |
+| DELETE | `/v1/gateway/providers/\{id\}` | Delete a provider |
 
 ### Routing Rules
 
@@ -552,8 +552,8 @@ List cost events.
 |--------|------|-------------|
 | GET | `/v1/gateway/routes` | List routing rules |
 | POST | `/v1/gateway/routes` | Create a routing rule |
-| PUT | `/v1/gateway/routes/{id}` | Update a routing rule |
-| DELETE | `/v1/gateway/routes/{id}` | Delete a routing rule |
+| PUT | `/v1/gateway/routes/\{id\}` | Update a routing rule |
+| DELETE | `/v1/gateway/routes/\{id\}` | Delete a routing rule |
 
 ### Fallback Chains
 
@@ -561,9 +561,9 @@ List cost events.
 |--------|------|-------------|
 | GET | `/v1/gateway/fallbacks` | List fallback chains |
 | POST | `/v1/gateway/fallbacks` | Create a fallback chain |
-| GET | `/v1/gateway/fallbacks/{id}` | Get a fallback chain |
-| PUT | `/v1/gateway/fallbacks/{id}` | Update a fallback chain |
-| DELETE | `/v1/gateway/fallbacks/{id}` | Delete a fallback chain |
+| GET | `/v1/gateway/fallbacks/\{id\}` | Get a fallback chain |
+| PUT | `/v1/gateway/fallbacks/\{id\}` | Update a fallback chain |
+| DELETE | `/v1/gateway/fallbacks/\{id\}` | Delete a fallback chain |
 
 ### Cache and Analytics
 
@@ -581,19 +581,19 @@ List cost events.
 |--------|------|-------------|
 | POST | `/v1/datasets` | Create a dataset |
 | GET | `/v1/datasets` | List datasets |
-| GET | `/v1/datasets/{id}` | Get a dataset |
-| PATCH | `/v1/datasets/{id}` | Update a dataset |
-| DELETE | `/v1/datasets/{id}` | Delete a dataset |
-| POST | `/v1/datasets/{id}/link/{suiteID}` | Link a dataset to a test suite |
-| DELETE | `/v1/datasets/{id}/link/{suiteID}` | Unlink a dataset from a test suite |
-| POST | `/v1/datasets/{id}/items` | Add an item |
-| POST | `/v1/datasets/{id}/items/batch` | Add items in batch |
-| GET | `/v1/datasets/{id}/items` | List items |
-| GET | `/v1/datasets/{id}/items/{itemID}` | Get an item |
-| DELETE | `/v1/datasets/{id}/items/{itemID}` | Delete an item |
-| POST | `/v1/datasets/{id}/import` | Import items (CSV/JSON) |
-| GET | `/v1/datasets/{id}/export` | Export items |
-| POST | `/v1/datasets/from-session/{sessionID}` | Create dataset from a production session |
+| GET | `/v1/datasets/\{id\}` | Get a dataset |
+| PATCH | `/v1/datasets/\{id\}` | Update a dataset |
+| DELETE | `/v1/datasets/\{id\}` | Delete a dataset |
+| POST | `/v1/datasets/\{id\}/link/\{suiteID\}` | Link a dataset to a test suite |
+| DELETE | `/v1/datasets/\{id\}/link/\{suiteID\}` | Unlink a dataset from a test suite |
+| POST | `/v1/datasets/\{id\}/items` | Add an item |
+| POST | `/v1/datasets/\{id\}/items/batch` | Add items in batch |
+| GET | `/v1/datasets/\{id\}/items` | List items |
+| GET | `/v1/datasets/\{id\}/items/\{itemID\}` | Get an item |
+| DELETE | `/v1/datasets/\{id\}/items/\{itemID\}` | Delete an item |
+| POST | `/v1/datasets/\{id\}/import` | Import items (CSV/JSON) |
+| GET | `/v1/datasets/\{id\}/export` | Export items |
+| POST | `/v1/datasets/from-session/\{sessionID\}` | Create dataset from a production session |
 
 ---
 
@@ -603,15 +603,15 @@ List cost events.
 |--------|------|-------------|
 | POST | `/v1/prompts` | Create a prompt |
 | GET | `/v1/prompts` | List prompts |
-| GET | `/v1/prompts/{id}` | Get a prompt by ID |
-| GET | `/v1/prompts/slug/{slug}` | Get a prompt by slug |
-| PATCH | `/v1/prompts/{id}` | Update a prompt |
-| DELETE | `/v1/prompts/{id}` | Delete a prompt |
-| POST | `/v1/prompts/{id}/versions` | Create a new version |
-| GET | `/v1/prompts/{id}/versions` | List versions |
-| GET | `/v1/prompts/{id}/versions/{version}` | Get a specific version |
-| POST | `/v1/prompts/{id}/deploy/{version}` | Deploy a version |
-| POST | `/v1/prompts/{id}/rollback` | Rollback to previous version |
+| GET | `/v1/prompts/\{id\}` | Get a prompt by ID |
+| GET | `/v1/prompts/slug/\{slug\}` | Get a prompt by slug |
+| PATCH | `/v1/prompts/\{id\}` | Update a prompt |
+| DELETE | `/v1/prompts/\{id\}` | Delete a prompt |
+| POST | `/v1/prompts/\{id\}/versions` | Create a new version |
+| GET | `/v1/prompts/\{id\}/versions` | List versions |
+| GET | `/v1/prompts/\{id\}/versions/\{version\}` | Get a specific version |
+| POST | `/v1/prompts/\{id\}/deploy/\{version\}` | Deploy a version |
+| POST | `/v1/prompts/\{id\}/rollback` | Rollback to previous version |
 
 ---
 
@@ -630,12 +630,12 @@ List cost events.
 |--------|------|-------------|
 | POST | `/v1/webhooks` | Create a webhook |
 | GET | `/v1/webhooks` | List webhooks |
-| GET | `/v1/webhooks/{id}` | Get a webhook |
-| PATCH | `/v1/webhooks/{id}` | Update a webhook |
-| DELETE | `/v1/webhooks/{id}` | Delete a webhook |
-| POST | `/v1/webhooks/{id}/test` | Send a test delivery |
-| GET | `/v1/webhooks/{id}/deliveries` | List deliveries |
-| POST | `/v1/webhooks/{id}/deliveries/{deliveryID}/retry` | Retry a delivery |
+| GET | `/v1/webhooks/\{id\}` | Get a webhook |
+| PATCH | `/v1/webhooks/\{id\}` | Update a webhook |
+| DELETE | `/v1/webhooks/\{id\}` | Delete a webhook |
+| POST | `/v1/webhooks/\{id\}/test` | Send a test delivery |
+| GET | `/v1/webhooks/\{id\}/deliveries` | List deliveries |
+| POST | `/v1/webhooks/\{id\}/deliveries/\{deliveryID\}/retry` | Retry a delivery |
 
 ---
 
@@ -666,7 +666,7 @@ These endpoints require JWT authentication (dashboard login).
 |--------|------|-------------|
 | GET | `/api/api-keys` | List API keys (shows prefix only) |
 | POST | `/api/api-keys` | Create a new API key (returns full key once) |
-| DELETE | `/api/api-keys/{id}` | Revoke an API key |
+| DELETE | `/api/api-keys/\{id\}` | Revoke an API key |
 
 ### Team Management
 
@@ -674,5 +674,5 @@ These endpoints require JWT authentication (dashboard login).
 |--------|------|-------------|
 | GET | `/api/team` | List team members |
 | POST | `/api/team/invite` | Invite a team member |
-| PATCH | `/api/team/{id}/role` | Update a member's role |
-| DELETE | `/api/team/{id}` | Remove a team member |
+| PATCH | `/api/team/\{id\}/role` | Update a member's role |
+| DELETE | `/api/team/\{id\}` | Remove a team member |
