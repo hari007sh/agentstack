@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -9,6 +9,8 @@ import {
   Search,
   Tag,
   Clock,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import {
   fadeIn,
@@ -35,66 +37,42 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { api, ApiError } from "@/lib/api";
+import { showSuccess, showError, showApiError } from "@/lib/toast";
 
-// --- Mock Data ---
+// --- Types matching backend store.Prompt ---
 interface Prompt {
+  id: string;
+  org_id: string;
+  slug: string;
+  name: string;
+  description: string;
+  active_version: number;
+  tags: string[];
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ListPromptsResponse {
+  data: Prompt[];
+  meta: {
+    page: number;
+    per_page: number;
+    total: number;
+  };
+}
+
+interface CreatePromptResponse {
   id: string;
   slug: string;
   name: string;
   description: string;
   active_version: number;
-  total_versions: number;
-  model: string;
   tags: string[];
+  created_at: string;
   updated_at: string;
 }
-
-const mockPrompts: Prompt[] = [
-  {
-    id: "prompt_001",
-    slug: "research-summarizer",
-    name: "Research Summarizer",
-    description: "Summarizes academic papers and extracts key findings with citations.",
-    active_version: 3,
-    total_versions: 3,
-    model: "gpt-4o",
-    tags: ["research", "summarization"],
-    updated_at: "2026-03-19T14:30:00Z",
-  },
-  {
-    id: "prompt_002",
-    slug: "code-reviewer",
-    name: "Code Review Assistant",
-    description: "Reviews code for bugs, security issues, and best practice violations.",
-    active_version: 5,
-    total_versions: 5,
-    model: "claude-3-opus",
-    tags: ["code", "review", "quality"],
-    updated_at: "2026-03-18T10:15:00Z",
-  },
-  {
-    id: "prompt_003",
-    slug: "support-agent-v2",
-    name: "Customer Support Agent",
-    description: "Handles customer queries with empathy and accuracy, escalating when needed.",
-    active_version: 2,
-    total_versions: 4,
-    model: "gpt-4o-mini",
-    tags: ["support", "customer"],
-    updated_at: "2026-03-17T08:45:00Z",
-  },
-  {
-    id: "prompt_004",
-    slug: "data-extractor",
-    name: "Structured Data Extractor",
-    description: "Extracts structured JSON data from unstructured text documents.",
-    active_version: 1,
-    total_versions: 1,
-    model: "gpt-4o",
-    tags: ["extraction", "json"],
-    updated_at: "2026-03-15T16:20:00Z",
-  },
-];
 
 function formatTimeAgo(ts: string): string {
   const d = new Date(ts);
@@ -111,8 +89,15 @@ function formatTimeAgo(ts: string): string {
 export default function PromptsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  // Delete confirmation
+  const [deleteTarget, setDeleteTarget] = useState<Prompt | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Create form state
   const [newSlug, setNewSlug] = useState("");
@@ -122,33 +107,114 @@ export default function PromptsPage() {
   const [newModel, setNewModel] = useState("gpt-4o");
   const [newTags, setNewTags] = useState("");
 
-  useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 800);
-    return () => clearTimeout(timer);
+  const fetchPrompts = useCallback(async () => {
+    try {
+      const token = localStorage.getItem("token");
+      if (token) api.setToken(token);
+
+      const res = await api.get<ListPromptsResponse>("/v1/prompts?per_page=200");
+      setPrompts(res.data || []);
+      setError(null);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        showApiError(err);
+        setError(err.message);
+      } else {
+        setError("Failed to load prompts");
+        showError("Failed to load prompts");
+      }
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  useEffect(() => {
+    fetchPrompts();
+  }, [fetchPrompts]);
+
   const filteredPrompts = useMemo(() => {
-    if (!search.trim()) return mockPrompts;
+    if (!search.trim()) return prompts;
     const q = search.toLowerCase();
-    return mockPrompts.filter(
+    return prompts.filter(
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.slug.toLowerCase().includes(q) ||
-        p.tags.some((t) => t.toLowerCase().includes(q))
+        (p.tags && p.tags.some((t) => t.toLowerCase().includes(q)))
     );
-  }, [search]);
+  }, [search, prompts]);
 
-  const isEmpty = !loading && filteredPrompts.length === 0;
+  const isEmpty = !loading && !error && filteredPrompts.length === 0;
 
-  const handleCreate = () => {
-    // Simulate creation
-    setDialogOpen(false);
+  const resetCreateForm = () => {
     setNewSlug("");
     setNewName("");
     setNewDescription("");
     setNewBody("");
     setNewModel("gpt-4o");
     setNewTags("");
+  };
+
+  const handleCreate = async () => {
+    if (!newSlug.trim() || !newName.trim() || !newBody.trim()) {
+      showError("Slug, name, and body are required");
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (token) api.setToken(token);
+
+      const tags = newTags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      await api.post<CreatePromptResponse>("/v1/prompts", {
+        slug: newSlug,
+        name: newName,
+        description: newDescription,
+        body: newBody,
+        model: newModel,
+        tags,
+      });
+
+      showSuccess("Prompt created successfully");
+      setDialogOpen(false);
+      resetCreateForm();
+      await fetchPrompts();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        showApiError(err);
+      } else {
+        showError("Failed to create prompt");
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+
+    setDeleting(true);
+    try {
+      const token = localStorage.getItem("token");
+      if (token) api.setToken(token);
+
+      await api.delete(`/v1/prompts/${deleteTarget.id}`);
+      showSuccess(`Deleted "${deleteTarget.name}"`);
+      setDeleteTarget(null);
+      await fetchPrompts();
+    } catch (err) {
+      if (err instanceof ApiError) {
+        showApiError(err);
+      } else {
+        showError("Failed to delete prompt");
+      }
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -274,9 +340,10 @@ export default function PromptsPage() {
               </Button>
               <Button
                 onClick={handleCreate}
+                disabled={creating}
                 className="bg-[var(--accent-blue)] text-white hover:bg-[var(--accent-blue)]/90"
               >
-                Create Prompt
+                {creating ? "Creating..." : "Create Prompt"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -314,6 +381,30 @@ export default function PromptsPage() {
         </div>
       )}
 
+      {/* Error State */}
+      {error && !loading && (
+        <div className="rounded-xl border border-[var(--accent-red)]/20 bg-[var(--accent-red)]/5 p-6 text-center">
+          <div className="w-12 h-12 rounded-xl bg-[var(--accent-red)]/10 flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle className="w-6 h-6 text-[var(--accent-red)]" />
+          </div>
+          <h3 className="text-sm font-medium mb-1">Failed to load prompts</h3>
+          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto mb-4">
+            {error}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setLoading(true);
+              setError(null);
+              fetchPrompts();
+            }}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Empty State */}
       {isEmpty && (
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-16 text-center">
@@ -329,7 +420,7 @@ export default function PromptsPage() {
       )}
 
       {/* Cards Grid */}
-      {!loading && filteredPrompts.length > 0 && (
+      {!loading && !error && filteredPrompts.length > 0 && (
         <motion.div
           variants={staggerContainer}
           initial="hidden"
@@ -341,13 +432,25 @@ export default function PromptsPage() {
               key={prompt.id}
               variants={staggerItem}
               onClick={() => router.push(`/dashboard/prompts/${prompt.id}`)}
-              className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-5 hover:border-[var(--border-default)] transition-colors cursor-pointer"
+              className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-5 hover:border-[var(--border-default)] transition-colors cursor-pointer group"
             >
               <div className="flex items-start justify-between mb-1">
                 <h3 className="text-sm font-semibold">{prompt.name}</h3>
-                <span className="flex-shrink-0 ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--accent-green)]/10 text-[var(--accent-green)] font-medium">
-                  v{prompt.active_version}
-                </span>
+                <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--accent-green)]/10 text-[var(--accent-green)] font-medium">
+                    v{prompt.active_version}
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTarget(prompt);
+                    }}
+                    className="p-1 rounded hover:bg-[var(--accent-red)]/10 text-[var(--text-tertiary)] hover:text-[var(--accent-red)] transition-colors opacity-0 group-hover:opacity-100"
+                    title="Delete prompt"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               <p className="text-xs font-mono text-[var(--text-tertiary)] mb-2">
@@ -360,16 +463,20 @@ export default function PromptsPage() {
 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <Tag className="w-3 h-3 text-[var(--text-tertiary)]" />
-                  {prompt.tags.map((tag) => (
-                    <Badge
-                      key={tag}
-                      variant="outline"
-                      className="text-[10px] px-1.5 py-0 h-5 border-[var(--border-subtle)] text-[var(--text-secondary)]"
-                    >
-                      {tag}
-                    </Badge>
-                  ))}
+                  {prompt.tags && prompt.tags.length > 0 && (
+                    <>
+                      <Tag className="w-3 h-3 text-[var(--text-tertiary)]" />
+                      {prompt.tags.map((tag) => (
+                        <Badge
+                          key={tag}
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 h-5 border-[var(--border-subtle)] text-[var(--text-secondary)]"
+                        >
+                          {tag}
+                        </Badge>
+                      ))}
+                    </>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 text-[10px] text-[var(--text-tertiary)] flex-shrink-0">
                   <Clock className="w-3 h-3" />
@@ -380,6 +487,43 @@ export default function PromptsPage() {
           ))}
         </motion.div>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent className="bg-[var(--bg-elevated)] border-[var(--border-subtle)] text-[var(--text-primary)] max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Prompt</DialogTitle>
+            <DialogDescription className="text-[var(--text-secondary)]">
+              Are you sure you want to delete{" "}
+              <span className="font-semibold text-[var(--text-primary)]">
+                {deleteTarget?.name}
+              </span>
+              ? This will also delete all versions. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setDeleteTarget(null)}
+              className="text-[var(--text-secondary)]"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-[var(--accent-red)] text-white hover:bg-[var(--accent-red)]/90"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </motion.div>
   );
 }

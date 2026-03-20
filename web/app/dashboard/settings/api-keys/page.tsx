@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Key,
@@ -14,6 +14,7 @@ import {
   Shield,
   Clock,
   Info,
+  Loader2,
 } from "lucide-react";
 import { fadeIn, staggerContainer, staggerItem } from "@/lib/animations";
 import { Button } from "@/components/ui/button";
@@ -35,74 +36,25 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { api, ApiError } from "@/lib/api";
+import { showSuccess, showError, showApiError } from "@/lib/toast";
 
-type KeyType = "production" | "development";
 type Permission = "read" | "write" | "admin";
 
-interface APIKey {
+interface APIKeyFromServer {
   id: string;
   name: string;
-  prefix: string;
-  key_type: KeyType;
-  permissions: Permission[];
-  description: string;
-  created_at: string;
+  key_prefix: string;
+  permissions: string[];
+  last_used_at: string | null;
   expires_at: string | null;
-  last_used: string | null;
+  created_at: string;
+  created_by: string | null;
 }
 
-// Mock data
-const mockKeys: APIKey[] = [
-  {
-    id: "1",
-    name: "Production SDK",
-    prefix: "as_sk_prod_7f3a...b2c1",
-    key_type: "production",
-    permissions: ["read", "write"],
-    description: "Main production SDK key for trace ingestion",
-    created_at: "2024-12-01T10:00:00Z",
-    expires_at: null,
-    last_used: "2026-03-20T08:30:00Z",
-  },
-  {
-    id: "2",
-    name: "Staging SDK",
-    prefix: "as_sk_stg_4e2d...a9f0",
-    key_type: "development",
-    permissions: ["read", "write"],
-    description: "Staging environment key",
-    created_at: "2024-12-15T14:00:00Z",
-    expires_at: "2026-06-15T00:00:00Z",
-    last_used: "2026-03-19T22:15:00Z",
-  },
-  {
-    id: "3",
-    name: "CI/CD Pipeline",
-    prefix: "as_sk_ci_8b1c...d4e7",
-    key_type: "production",
-    permissions: ["read"],
-    description: "Read-only key for CI test quality gates",
-    created_at: "2025-01-10T09:00:00Z",
-    expires_at: "2026-04-10T00:00:00Z",
-    last_used: null,
-  },
-  {
-    id: "4",
-    name: "Admin Dashboard",
-    prefix: "as_sk_adm_2c9f...e8a3",
-    key_type: "production",
-    permissions: ["read", "write", "admin"],
-    description: "Full admin access for internal tooling",
-    created_at: "2025-02-20T11:00:00Z",
-    expires_at: null,
-    last_used: "2026-03-18T14:22:00Z",
-  },
-];
-
-const keyTypeStyles: Record<KeyType, string> = {
-  production: "bg-[var(--accent-green)]/10 text-[var(--accent-green)] border-[var(--accent-green)]/20",
-  development: "bg-[var(--accent-amber)]/10 text-[var(--accent-amber)] border-[var(--accent-amber)]/20",
-};
+interface APIKeyCreateResponse extends APIKeyFromServer {
+  key: string;
+}
 
 const permissionStyles: Record<Permission, string> = {
   read: "bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]",
@@ -111,15 +63,16 @@ const permissionStyles: Record<Permission, string> = {
 };
 
 export default function APIKeysPage() {
-  const [keys, setKeys] = useState<APIKey[]>(mockKeys);
+  const [keys, setKeys] = useState<APIKeyFromServer[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showRevokeConfirm, setShowRevokeConfirm] = useState<string | null>(null);
   const [revokeConfirmText, setRevokeConfirmText] = useState("");
+  const [revoking, setRevoking] = useState(false);
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set());
 
   // Create form state
   const [newKeyName, setNewKeyName] = useState("");
-  const [newKeyType, setNewKeyType] = useState<KeyType>("production");
   const [newKeyPerms, setNewKeyPerms] = useState<Set<Permission>>(new Set<Permission>(["read", "write"]));
   const [newKeyExpiration, setNewKeyExpiration] = useState("never");
   const [newKeyDescription, setNewKeyDescription] = useState("");
@@ -127,37 +80,91 @@ export default function APIKeysPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
-  const handleCreate = () => {
+  const initToken = useCallback(() => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    if (token) {
+      api.setToken(token);
+    }
+    return !!token;
+  }, []);
+
+  // Fetch API keys on mount
+  const fetchKeys = useCallback(async () => {
+    if (!initToken()) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const data = await api.get<APIKeyFromServer[]>("/api/api-keys");
+      setKeys(data);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        showApiError(err);
+      } else {
+        showError("Failed to load API keys");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [initToken]);
+
+  useEffect(() => {
+    fetchKeys();
+  }, [fetchKeys]);
+
+  const handleCreate = async () => {
     if (!newKeyName.trim()) return;
     setCreating(true);
-    setTimeout(() => {
-      const fakeKey = `as_sk_${newKeyType === "production" ? "prod" : "dev"}_${Math.random().toString(36).slice(2, 14)}${Math.random().toString(36).slice(2, 14)}`;
-      const expiresAt = newKeyExpiration === "never" ? null : (() => {
-        const d = new Date();
-        d.setDate(d.getDate() + parseInt(newKeyExpiration));
-        return d.toISOString();
-      })();
-      const newApiKey: APIKey = {
-        id: String(Date.now()),
-        name: newKeyName,
-        prefix: `${fakeKey.slice(0, 16)}...${fakeKey.slice(-4)}`,
-        key_type: newKeyType,
+
+    try {
+      initToken();
+
+      const expiresIn = newKeyExpiration === "never" ? undefined : parseInt(newKeyExpiration);
+
+      const resp = await api.post<APIKeyCreateResponse>("/api/api-keys", {
+        name: newKeyName.trim(),
         permissions: Array.from(newKeyPerms),
-        description: newKeyDescription,
-        created_at: new Date().toISOString(),
-        expires_at: expiresAt,
-        last_used: null,
-      };
-      setKeys((prev) => [newApiKey, ...prev]);
-      setCreatedKey(fakeKey);
+        expires_in: expiresIn || null,
+      });
+
+      // Show the raw key (only shown once)
+      setCreatedKey(resp.key);
+
+      // Add the new key to the list (without the raw key)
+      const { key: _, ...keyData } = resp; void _;
+      setKeys((prev) => [keyData, ...prev]);
+
+      showSuccess("API key created successfully");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        showApiError(err);
+      } else {
+        showError("Failed to create API key");
+      }
+    } finally {
       setCreating(false);
-    }, 600);
+    }
   };
 
-  const handleRevoke = (id: string) => {
-    setKeys((prev) => prev.filter((k) => k.id !== id));
-    setShowRevokeConfirm(null);
-    setRevokeConfirmText("");
+  const handleRevoke = async (id: string) => {
+    setRevoking(true);
+    try {
+      initToken();
+      await api.delete(`/api/api-keys/${id}`);
+      setKeys((prev) => prev.filter((k) => k.id !== id));
+      setShowRevokeConfirm(null);
+      setRevokeConfirmText("");
+      showSuccess("API key revoked");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        showApiError(err);
+      } else {
+        showError("Failed to revoke API key");
+      }
+    } finally {
+      setRevoking(false);
+    }
   };
 
   const handleCopy = (text: string, id: string) => {
@@ -191,7 +198,6 @@ export default function APIKeysPage() {
   const resetCreateDialog = () => {
     setShowCreate(false);
     setNewKeyName("");
-    setNewKeyType("production");
     setNewKeyPerms(new Set<Permission>(["read", "write"]));
     setNewKeyExpiration("never");
     setNewKeyDescription("");
@@ -230,6 +236,32 @@ export default function APIKeysPage() {
   };
 
   const revokeKey = keys.find((k) => k.id === showRevokeConfirm);
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="h-6 w-32 bg-[var(--bg-hover)] rounded animate-pulse" />
+            <div className="h-4 w-64 bg-[var(--bg-hover)] rounded animate-pulse mt-2" />
+          </div>
+          <div className="h-9 w-36 bg-[var(--bg-hover)] rounded animate-pulse" />
+        </div>
+        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="flex items-center gap-4 py-3">
+              <div className="h-7 w-7 bg-[var(--bg-hover)] rounded-md animate-pulse" />
+              <div className="flex-1 space-y-2">
+                <div className="h-4 w-40 bg-[var(--bg-hover)] rounded animate-pulse" />
+                <div className="h-3 w-24 bg-[var(--bg-hover)] rounded animate-pulse" />
+              </div>
+              <div className="h-5 w-20 bg-[var(--bg-hover)] rounded animate-pulse" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <motion.div
@@ -300,9 +332,6 @@ export default function APIKeysPage() {
                     Key
                   </th>
                   <th className="text-left px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                    Type
-                  </th>
-                  <th className="text-left px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
                     Permissions
                   </th>
                   <th className="text-left px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
@@ -320,6 +349,7 @@ export default function APIKeysPage() {
                 {keys.map((key) => {
                   const expiryStatus = getExpiryStatus(key.expires_at);
                   const isVisible = visibleKeys.has(key.id);
+                  const displayPrefix = key.key_prefix || "as_sk_...";
                   return (
                     <motion.tr
                       key={key.id}
@@ -335,18 +365,16 @@ export default function APIKeysPage() {
                             <span className="text-sm font-medium text-[var(--text-primary)] block">
                               {key.name}
                             </span>
-                            {key.description && (
-                              <span className="text-[10px] text-[var(--text-tertiary)] block mt-0.5 max-w-[180px] truncate">
-                                {key.description}
-                              </span>
-                            )}
+                            <span className="text-[10px] text-[var(--text-tertiary)] block mt-0.5">
+                              Created {formatDate(key.created_at)}
+                            </span>
                           </div>
                         </div>
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-1.5">
                           <code className="font-mono text-xs text-[var(--text-secondary)] bg-[var(--bg-primary)] px-2 py-1 rounded">
-                            {isVisible ? key.prefix.replace("...", "****") : key.prefix}
+                            {isVisible ? displayPrefix : displayPrefix.slice(0, 8) + "..."}
                           </code>
                           <button
                             onClick={() => toggleKeyVisibility(key.id)}
@@ -356,7 +384,7 @@ export default function APIKeysPage() {
                             {isVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                           </button>
                           <button
-                            onClick={() => handleCopy(key.prefix, key.id)}
+                            onClick={() => handleCopy(displayPrefix, key.id)}
                             className="p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
                             title="Copy key prefix"
                           >
@@ -369,14 +397,9 @@ export default function APIKeysPage() {
                         </div>
                       </td>
                       <td className="px-5 py-3.5">
-                        <Badge className={`${keyTypeStyles[key.key_type]} border text-[10px] uppercase tracking-wider font-semibold`}>
-                          {key.key_type}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3.5">
                         <div className="flex items-center gap-1">
-                          {key.permissions.map((perm) => (
-                            <Badge key={perm} className={`${permissionStyles[perm]} border-0 text-[10px] uppercase tracking-wider font-medium`}>
+                          {(key.permissions && key.permissions.length > 0 ? key.permissions : ["read", "write"]).map((perm) => (
+                            <Badge key={perm} className={`${permissionStyles[perm as Permission] || ""} border-0 text-[10px] uppercase tracking-wider font-medium`}>
                               {perm}
                             </Badge>
                           ))}
@@ -393,7 +416,7 @@ export default function APIKeysPage() {
                         </div>
                       </td>
                       <td className="px-5 py-3.5 text-sm text-[var(--text-secondary)]">
-                        {formatRelative(key.last_used)}
+                        {formatRelative(key.last_used_at)}
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end">
@@ -484,39 +507,23 @@ export default function APIKeysPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                    Environment
-                  </label>
-                  <Select value={newKeyType} onValueChange={(v) => setNewKeyType(v as KeyType)}>
-                    <SelectTrigger className="bg-[var(--bg-primary)] border-[var(--border-default)]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="production">Production</SelectItem>
-                      <SelectItem value="development">Development</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                    Expiration
-                  </label>
-                  <Select value={newKeyExpiration} onValueChange={setNewKeyExpiration}>
-                    <SelectTrigger className="bg-[var(--bg-primary)] border-[var(--border-default)]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="never">No expiration</SelectItem>
-                      <SelectItem value="30">30 days</SelectItem>
-                      <SelectItem value="60">60 days</SelectItem>
-                      <SelectItem value="90">90 days</SelectItem>
-                      <SelectItem value="180">180 days</SelectItem>
-                      <SelectItem value="365">1 year</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
+                  Expiration
+                </label>
+                <Select value={newKeyExpiration} onValueChange={setNewKeyExpiration}>
+                  <SelectTrigger className="bg-[var(--bg-primary)] border-[var(--border-default)]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="never">No expiration</SelectItem>
+                    <SelectItem value="30">30 days</SelectItem>
+                    <SelectItem value="60">60 days</SelectItem>
+                    <SelectItem value="90">90 days</SelectItem>
+                    <SelectItem value="180">180 days</SelectItem>
+                    <SelectItem value="365">1 year</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
@@ -560,7 +567,7 @@ export default function APIKeysPage() {
                 >
                   {creating ? (
                     <span className="flex items-center gap-2">
-                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       Creating...
                     </span>
                   ) : (
@@ -597,7 +604,7 @@ export default function APIKeysPage() {
                   <Key className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
                   <span className="text-sm font-medium text-[var(--text-primary)]">{revokeKey.name}</span>
                 </div>
-                <code className="font-mono text-xs text-[var(--text-tertiary)]">{revokeKey.prefix}</code>
+                <code className="font-mono text-xs text-[var(--text-tertiary)]">{revokeKey.key_prefix}</code>
               </div>
               <div>
                 <p className="text-xs text-[var(--text-secondary)] mb-2">
@@ -620,10 +627,19 @@ export default function APIKeysPage() {
             <Button
               variant="destructive"
               onClick={() => showRevokeConfirm && handleRevoke(showRevokeConfirm)}
-              disabled={!revokeKey || revokeConfirmText !== revokeKey.name}
+              disabled={!revokeKey || revokeConfirmText !== revokeKey.name || revoking}
             >
-              <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-              Revoke Key
+              {revoking ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Revoking...
+                </span>
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                  Revoke Key
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

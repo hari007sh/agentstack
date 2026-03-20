@@ -429,7 +429,21 @@ func (s *Server) setupRoutes() {
 	// Dashboard API — authenticated via JWT
 	s.router.Route("/api", func(r chi.Router) {
 		r.Use(middleware.JWTAuth(s.jwtManager))
-		// Dashboard-specific endpoints will be added per phase
+
+		// Organization management
+		r.Route("/org", func(r chi.Router) {
+			r.Get("/", s.handleGetOrg)
+			r.Patch("/", s.handleUpdateOrg)
+			r.Delete("/", s.handleDeleteOrg)
+			r.Get("/usage", s.handleGetOrgUsage)
+		})
+
+		// API key management
+		r.Route("/api-keys", func(r chi.Router) {
+			r.Get("/", s.handleListAPIKeys)
+			r.Post("/", s.handleCreateAPIKey)
+			r.Delete("/{id}", s.handleDeleteAPIKey)
+		})
 	})
 }
 

@@ -1,54 +1,19 @@
 "use client";
 
-import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   CreditCard,
   Zap,
   ArrowUpRight,
   Check,
-  Activity,
-  Clock,
-  Users,
-  TrendingUp,
-  Download,
-  Edit,
   Mail,
 } from "lucide-react";
 import { fadeIn, staggerContainer, staggerItem } from "@/lib/animations";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { showSuccess } from "@/lib/toast";
 
-// Mock data
-const mockPlan = {
-  name: "Team" as const,
-  price_cents: 19900,
-  period: "monthly" as const,
-  next_billing: "2026-04-15",
-  events_limit: 1000000,
-  events_used: 423847,
-  retention_days: 90,
-  retention_used: 67,
-  members_limit: 10,
-  members_used: 5,
-};
-
-const planColors: Record<string, string> = {
-  "Self-Hosted": "bg-zinc-500/10 text-zinc-400",
-  Cloud: "bg-blue-500/10 text-blue-400",
-  Team: "bg-purple-500/10 text-purple-400",
-  Enterprise: "bg-amber-500/10 text-amber-400",
-};
-
+// --- Plan tier types ---
 type PlanTier = "free" | "cloud" | "team" | "enterprise";
 
 interface PlanInfo {
@@ -91,7 +56,7 @@ const allPlans: Record<PlanTier, PlanInfo> = {
       "99.9% uptime SLA",
     ],
     limits: { events: "100K/mo", retention: "30 days", members: "3" },
-    cta: "Downgrade",
+    cta: "Select",
   },
   team: {
     name: "Team",
@@ -108,7 +73,7 @@ const allPlans: Record<PlanTier, PlanInfo> = {
     ],
     limits: { events: "1M/mo", retention: "90 days", members: "10" },
     highlight: true,
-    cta: "Current Plan",
+    cta: "Select",
   },
   enterprise: {
     name: "Enterprise",
@@ -129,80 +94,28 @@ const allPlans: Record<PlanTier, PlanInfo> = {
   },
 };
 
-const invoices = [
-  { id: "INV-2026-003", date: "Mar 15, 2026", desc: "Team Plan - Monthly", amount: 19900, status: "Paid" as const },
-  { id: "INV-2026-002", date: "Feb 15, 2026", desc: "Team Plan - Monthly", amount: 19900, status: "Paid" as const },
-  { id: "INV-2026-001", date: "Jan 15, 2026", desc: "Team Plan - Monthly", amount: 19900, status: "Paid" as const },
-  { id: "INV-2025-012", date: "Dec 15, 2025", desc: "Team Plan - Monthly", amount: 19900, status: "Paid" as const },
-  { id: "INV-2025-011", date: "Nov 15, 2025", desc: "Team Plan - Monthly", amount: 19900, status: "Paid" as const },
-];
+// The current deployment is self-hosted (free) since there is no Stripe
+// integration. The plan comparison UI is kept as informational.
+const CURRENT_PLAN_TIER: PlanTier = "free";
+const CURRENT_PLAN_NAME = "Self-Hosted";
 
-function UsageBar({
-  label,
-  used,
-  limit,
-  icon: Icon,
-  formatValue,
-}: {
-  label: string;
-  used: number;
-  limit: number;
-  icon: React.ElementType;
-  formatValue: (v: number) => string;
-}) {
-  const percentage = Math.min((used / limit) * 100, 100);
-  const isHigh = percentage > 80;
-  const isCritical = percentage > 95;
+const planColors: Record<string, string> = {
+  "Self-Hosted": "bg-zinc-500/10 text-zinc-400",
+  Cloud: "bg-blue-500/10 text-blue-400",
+  Team: "bg-purple-500/10 text-purple-400",
+  Enterprise: "bg-amber-500/10 text-amber-400",
+};
 
-  return (
-    <div className="space-y-2.5">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Icon className="w-4 h-4 text-[var(--text-tertiary)]" />
-          <span className="text-sm text-[var(--text-primary)]">{label}</span>
-        </div>
-        <span className="text-sm text-[var(--text-secondary)] tabular-nums">
-          {formatValue(used)}{" "}
-          <span className="text-[var(--text-tertiary)]">
-            / {formatValue(limit)}
-          </span>
-        </span>
-      </div>
-      <div className="h-2 rounded-full bg-[var(--bg-primary)] overflow-hidden border border-[var(--border-subtle)]">
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${percentage}%` }}
-          transition={{ duration: 0.8, ease: "easeOut", delay: 0.2 }}
-          className={`h-full rounded-full ${
-            isCritical
-              ? "bg-[var(--accent-red)]"
-              : isHigh
-              ? "bg-[var(--accent-amber)]"
-              : "bg-[var(--accent-blue)]"
-          }`}
-        />
-      </div>
-      <p className="text-[10px] text-[var(--text-tertiary)]">
-        {percentage.toFixed(1)}% used
-        {isHigh && !isCritical && " -- approaching limit"}
-        {isCritical && " -- near limit, consider upgrading"}
-      </p>
-    </div>
-  );
+function handlePlanAction(tier: PlanTier) {
+  if (tier === "enterprise") {
+    // Open mail client to contact sales
+    window.location.href = "mailto:sales@agentstack.dev?subject=AgentStack%20Enterprise%20Inquiry";
+    return;
+  }
+  showSuccess("Contact sales@agentstack.dev to change plans");
 }
 
 export default function BillingPage() {
-  const [showUpdatePayment, setShowUpdatePayment] = useState(false);
-
-  const formatEvents = (v: number) => {
-    if (v >= 1000000) return `${(v / 1000000).toFixed(1)}M`;
-    if (v >= 1000) return `${(v / 1000).toFixed(0)}K`;
-    return v.toLocaleString();
-  };
-
-  const formatDays = (v: number) => `${v} days`;
-  const formatMembers = (v: number) => `${v}`;
-
   return (
     <motion.div
       variants={fadeIn}
@@ -214,7 +127,7 @@ export default function BillingPage() {
       <div>
         <h1 className="text-xl font-semibold text-[var(--text-primary)]">Billing</h1>
         <p className="text-sm text-[var(--text-secondary)] mt-1">
-          Manage your subscription, payment methods, and invoices
+          Manage your subscription plan
         </p>
       </div>
 
@@ -238,32 +151,27 @@ export default function BillingPage() {
                 <div className="flex items-center gap-2.5">
                   <h2 className="text-base font-semibold text-[var(--text-primary)]">Current Plan</h2>
                   <Badge
-                    className={`${planColors[mockPlan.name]} border-0 text-[10px] uppercase tracking-wider font-semibold`}
+                    className={`${planColors[CURRENT_PLAN_NAME]} border-0 text-[10px] uppercase tracking-wider font-semibold`}
                   >
-                    {mockPlan.name}
+                    {CURRENT_PLAN_NAME}
                   </Badge>
                 </div>
                 <p className="text-xs text-[var(--text-tertiary)] mt-0.5">
-                  Next billing date:{" "}
-                  {new Date(mockPlan.next_billing).toLocaleDateString("en-US", {
-                    month: "long",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
+                  Open-source self-hosted deployment
                 </p>
               </div>
             </div>
             <div className="text-right">
               <p className="text-2xl font-bold text-[var(--text-primary)] tabular-nums">
-                ${(mockPlan.price_cents / 100).toFixed(0)}
+                Free
               </p>
-              <p className="text-xs text-[var(--text-tertiary)]">per month</p>
+              <p className="text-xs text-[var(--text-tertiary)]">forever</p>
             </div>
           </div>
 
           {/* Plan features quick list */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-5">
-            {allPlans.team.features.map((feature) => (
+            {allPlans.free.features.map((feature) => (
               <div key={feature} className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
                 <Check className="w-3 h-3 text-[var(--accent-green)] flex-shrink-0" />
                 {feature}
@@ -275,10 +183,10 @@ export default function BillingPage() {
           <div className="grid grid-cols-3 gap-4 p-4 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-subtle)]">
             <div>
               <p className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                Events This Month
+                Events
               </p>
-              <p className="text-lg font-semibold mt-1 text-[var(--text-primary)] tabular-nums">
-                {formatEvents(mockPlan.events_used)}
+              <p className="text-lg font-semibold mt-1 text-[var(--text-primary)]">
+                Unlimited
               </p>
             </div>
             <div>
@@ -286,59 +194,71 @@ export default function BillingPage() {
                 Data Retention
               </p>
               <p className="text-lg font-semibold mt-1 text-[var(--text-primary)]">
-                {mockPlan.retention_days} days
+                Unlimited
               </p>
             </div>
             <div>
               <p className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
                 Team Members
               </p>
-              <p className="text-lg font-semibold mt-1 text-[var(--text-primary)] tabular-nums">
-                {mockPlan.members_used} / {mockPlan.members_limit}
+              <p className="text-lg font-semibold mt-1 text-[var(--text-primary)]">
+                Unlimited
               </p>
             </div>
           </div>
         </motion.div>
 
-        {/* Usage section */}
+        {/* Payment & Invoices — Coming Soon */}
         <motion.div
           variants={staggerItem}
           className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6"
         >
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-9 h-9 rounded-lg bg-[var(--accent-blue)]/10 flex items-center justify-center">
-              <TrendingUp className="w-4.5 h-4.5 text-[var(--accent-blue)]" />
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-9 h-9 rounded-lg bg-[var(--bg-hover)] flex items-center justify-center">
+              <CreditCard className="w-4.5 h-4.5 text-[var(--text-tertiary)]" />
             </div>
-            <div>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Usage</h2>
+            <div className="flex-1">
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Payment Method</h2>
               <p className="text-xs text-[var(--text-tertiary)]">
-                Current billing period resource consumption
+                Payment processing coming soon
               </p>
             </div>
           </div>
 
-          <div className="space-y-6">
-            <UsageBar
-              label="Events"
-              used={mockPlan.events_used}
-              limit={mockPlan.events_limit}
-              icon={Activity}
-              formatValue={formatEvents}
-            />
-            <UsageBar
-              label="Data Retention"
-              used={mockPlan.retention_used}
-              limit={mockPlan.retention_days}
-              icon={Clock}
-              formatValue={formatDays}
-            />
-            <UsageBar
-              label="Team Members"
-              used={mockPlan.members_used}
-              limit={mockPlan.members_limit}
-              icon={Users}
-              formatValue={formatMembers}
-            />
+          <div className="flex items-center justify-between p-4 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-subtle)]">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-7 rounded bg-[var(--bg-hover)] flex items-center justify-center">
+                <CreditCard className="w-4 h-4 text-[var(--text-tertiary)]" />
+              </div>
+              <div>
+                <p className="text-sm text-[var(--text-secondary)]">No payment method on file</p>
+                <p className="text-xs text-[var(--text-tertiary)]">
+                  Self-hosted plans do not require payment
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                showSuccess("Payment processing coming soon")
+              }
+            >
+              Update
+            </Button>
+          </div>
+
+          {/* Billing Contact */}
+          <div className="mt-4 pt-4 border-t border-[var(--border-subtle)]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Mail className="w-4 h-4 text-[var(--text-tertiary)]" />
+                <div>
+                  <p className="text-sm text-[var(--text-primary)]">Invoices</p>
+                  <p className="text-xs text-[var(--text-tertiary)]">Invoices coming soon</p>
+                </div>
+              </div>
+            </div>
           </div>
         </motion.div>
 
@@ -361,7 +281,7 @@ export default function BillingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {(Object.entries(allPlans) as [PlanTier, PlanInfo][]).map(([tier, plan]) => {
-              const isCurrent = plan.name === mockPlan.name;
+              const isCurrent = tier === CURRENT_PLAN_TIER;
               return (
                 <div
                   key={tier}
@@ -420,6 +340,7 @@ export default function BillingPage() {
                     size="sm"
                     className="w-full"
                     disabled={isCurrent}
+                    onClick={() => handlePlanAction(tier)}
                   >
                     {isCurrent ? (
                       "Current Plan"
@@ -437,198 +358,7 @@ export default function BillingPage() {
             })}
           </div>
         </motion.div>
-
-        {/* Payment Method */}
-        <motion.div
-          variants={staggerItem}
-          className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-6"
-        >
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-9 h-9 rounded-lg bg-[var(--bg-hover)] flex items-center justify-center">
-              <CreditCard className="w-4.5 h-4.5 text-[var(--text-tertiary)]" />
-            </div>
-            <div className="flex-1">
-              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Payment Method</h2>
-              <p className="text-xs text-[var(--text-tertiary)]">
-                Card on file for subscription payments
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between p-4 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-subtle)]">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-7 rounded bg-gradient-to-r from-blue-600 to-blue-800 flex items-center justify-center">
-                <span className="text-white text-[9px] font-bold tracking-wider">VISA</span>
-              </div>
-              <div>
-                <p className="text-sm text-[var(--text-primary)] font-mono">**** **** **** 4242</p>
-                <p className="text-xs text-[var(--text-tertiary)]">Expires 12/2027</p>
-              </div>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => setShowUpdatePayment(true)}>
-              <Edit className="w-3 h-3 mr-1.5" />
-              Update
-            </Button>
-          </div>
-
-          {/* Billing Contact */}
-          <div className="mt-4 pt-4 border-t border-[var(--border-subtle)]">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Mail className="w-4 h-4 text-[var(--text-tertiary)]" />
-                <div>
-                  <p className="text-sm text-[var(--text-primary)]">Billing Contact</p>
-                  <p className="text-xs text-[var(--text-tertiary)]">billing@acme.com</p>
-                </div>
-              </div>
-              <Button variant="ghost" size="sm">
-                <Edit className="w-3 h-3 mr-1.5" />
-                Edit
-              </Button>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Invoice History */}
-        <motion.div
-          variants={staggerItem}
-          className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] overflow-hidden"
-        >
-          <div className="px-6 py-4 border-b border-[var(--border-subtle)]">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-[var(--bg-hover)] flex items-center justify-center">
-                <CreditCard className="w-4.5 h-4.5 text-[var(--text-tertiary)]" />
-              </div>
-              <div>
-                <h2 className="text-sm font-semibold text-[var(--text-primary)]">Invoice History</h2>
-                <p className="text-xs text-[var(--text-tertiary)]">
-                  Past invoices and receipts
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-[var(--border-subtle)]">
-                  <th className="text-left px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                    Invoice
-                  </th>
-                  <th className="text-left px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                    Date
-                  </th>
-                  <th className="text-left px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                    Description
-                  </th>
-                  <th className="text-left px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                    Amount
-                  </th>
-                  <th className="text-left px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                    Status
-                  </th>
-                  <th className="text-right px-5 py-3 text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                    Receipt
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoices.map((invoice) => (
-                  <tr
-                    key={invoice.id}
-                    className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors"
-                  >
-                    <td className="px-5 py-3 text-sm text-[var(--text-primary)] font-mono text-xs">
-                      {invoice.id}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">
-                      {invoice.date}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-primary)]">
-                      {invoice.desc}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-primary)] font-medium tabular-nums">
-                      ${(invoice.amount / 100).toFixed(2)}
-                    </td>
-                    <td className="px-5 py-3">
-                      <Badge className="bg-[var(--accent-green)]/10 text-[var(--accent-green)] border-0 text-[10px] uppercase tracking-wider font-semibold">
-                        {invoice.status}
-                      </Badge>
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center justify-end">
-                        <button className="p-1.5 rounded hover:bg-[var(--bg-hover)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors">
-                          <Download className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </motion.div>
       </motion.div>
-
-      {/* Update Payment Method Dialog */}
-      <Dialog open={showUpdatePayment} onOpenChange={setShowUpdatePayment}>
-        <DialogContent className="bg-[var(--bg-elevated)] border-[var(--border-default)]">
-          <DialogHeader>
-            <DialogTitle>Update Payment Method</DialogTitle>
-            <DialogDescription>
-              Enter your new card details. Your current card will be replaced.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                Card Number
-              </label>
-              <Input
-                placeholder="4242 4242 4242 4242"
-                className="bg-[var(--bg-primary)] border-[var(--border-default)] font-mono"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                  Expiry Date
-                </label>
-                <Input
-                  placeholder="MM / YY"
-                  className="bg-[var(--bg-primary)] border-[var(--border-default)] font-mono"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                  CVC
-                </label>
-                <Input
-                  placeholder="123"
-                  className="bg-[var(--bg-primary)] border-[var(--border-default)] font-mono"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-medium">
-                Billing Address
-              </label>
-              <Input
-                placeholder="123 Main St, City, State"
-                className="bg-[var(--bg-primary)] border-[var(--border-default)]"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowUpdatePayment(false)}>
-              Cancel
-            </Button>
-            <Button onClick={() => setShowUpdatePayment(false)}>
-              Update Card
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </motion.div>
   );
 }
