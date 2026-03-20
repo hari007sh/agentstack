@@ -116,8 +116,11 @@ func (h *PlaygroundHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	if req.Stream {
 		if err := h.executor.ExecuteStream(r.Context(), orgID, execReq, w); err != nil {
 			h.logger.Error("streaming execution failed", "org_id", orgID, "error", err)
-			// If headers haven't been sent yet, return error as JSON
-			// Otherwise the error is lost (headers already sent for SSE)
+			// If Content-Type hasn't been set to text/event-stream yet,
+			// the headers haven't been flushed — safe to write a JSON error.
+			if w.Header().Get("Content-Type") != "text/event-stream" {
+				httputil.WriteError(w, http.StatusInternalServerError, "EXECUTION_ERROR", err.Error())
+			}
 			return
 		}
 		return

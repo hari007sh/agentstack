@@ -512,10 +512,14 @@ type GatewayRequest struct {
 
 // InsertGatewayRequest logs a gateway request.
 func (s *Store) InsertGatewayRequest(ctx context.Context, gr *GatewayRequest) error {
+	errMsg := ""
+	if gr.ErrorMessage != nil {
+		errMsg = *gr.ErrorMessage
+	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO gateway_requests (org_id, model_requested, model_used, provider_used, tokens_in, tokens_out, cost_cents, latency_ms, ttfb_ms, cache_hit, status, error_message)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-		gr.OrgID, gr.ModelRequested, gr.ModelUsed, gr.ProviderUsed, gr.TokensIn, gr.TokensOut, gr.CostCents, gr.LatencyMs, gr.TTFBMs, gr.CacheHit, gr.Status, gr.ErrorMessage,
+		gr.OrgID, gr.ModelRequested, gr.ModelUsed, gr.ProviderUsed, gr.TokensIn, gr.TokensOut, gr.CostCents, gr.LatencyMs, gr.TTFBMs, gr.CacheHit, gr.Status, errMsg,
 	)
 	if err != nil {
 		return fmt.Errorf("insert gateway request: %w", err)
