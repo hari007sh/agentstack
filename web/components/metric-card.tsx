@@ -27,13 +27,13 @@ const colorMap = {
   cyan: "var(--healing-blue)",
 };
 
-const glowMap = {
-  blue: "glow-blue",
-  green: "glow-green",
-  red: "glow-red",
-  amber: "glow-amber",
-  purple: "glow-purple",
-  cyan: "glow-cyan",
+const glowShadowMap: Record<string, string> = {
+  blue: "0 0 20px -5px rgba(59,130,246,0.15)",
+  green: "0 0 20px -5px rgba(34,197,94,0.15)",
+  red: "0 0 20px -5px rgba(239,68,68,0.15)",
+  amber: "0 0 20px -5px rgba(245,158,11,0.15)",
+  purple: "0 0 20px -5px rgba(168,85,247,0.15)",
+  cyan: "0 0 20px -5px rgba(56,189,248,0.15)",
 };
 
 // Simple sparkline data (deterministic from value for consistency)
@@ -167,10 +167,13 @@ export function MetricCard({
       variants={staggerItem}
       className={cn(
         "group relative rounded-xl glass gradient-border shine-hover overflow-hidden transition-all duration-200",
-        `hover:${glowMap[color]}`,
         size === "large" ? "p-6" : "p-4"
       )}
-      whileHover={{ y: -1, transition: { duration: 0.15 } }}
+      whileHover={{
+        y: -2,
+        boxShadow: glowShadowMap[color] || glowShadowMap.blue,
+        transition: { duration: 0.15 },
+      }}
     >
       {/* Subtle accent glow in corner */}
       <div

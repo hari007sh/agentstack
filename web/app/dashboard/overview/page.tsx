@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
 import { ReliabilityScore } from "@/components/reliability-score";
+import { AreaChart, LineChart } from "@/components/charts";
 import { fadeIn, staggerContainer } from "@/lib/animations";
 
 // Mock data for Phase 1 — will be replaced with API calls in Phase 2
@@ -43,6 +44,43 @@ const statusColors: Record<string, string> = {
   timeout: "var(--accent-amber)",
   healed: "var(--healing-blue)",
 };
+
+const statusBadgeClass: Record<string, string> = {
+  completed: "bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20",
+  failed: "bg-[var(--accent-red)]/10 text-[var(--accent-red)] border border-[var(--accent-red)]/20",
+  running: "bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] border border-[var(--accent-blue)]/20",
+  timeout: "bg-[var(--accent-amber)]/10 text-[var(--accent-amber)] border border-[var(--accent-amber)]/20",
+  healed: "bg-[var(--healing-blue)]/10 text-[var(--healing-blue)] border border-[var(--healing-blue)]/20",
+};
+
+const statusDotClass: Record<string, string> = {
+  completed: "",
+  failed: "status-failed",
+  running: "animate-pulse",
+  timeout: "",
+  healed: "status-healed",
+};
+
+// Mock chart data — last 7 days
+const sessionsOverTime = [
+  { label: "Mar 14", value: 1620 },
+  { label: "Mar 15", value: 1840 },
+  { label: "Mar 16", value: 1735 },
+  { label: "Mar 17", value: 2105 },
+  { label: "Mar 18", value: 1950 },
+  { label: "Mar 19", value: 2280 },
+  { label: "Mar 20", value: 1917 },
+];
+
+const failureRateData = [
+  { label: "Mar 14", value: 5.8 },
+  { label: "Mar 15", value: 5.2 },
+  { label: "Mar 16", value: 6.1 },
+  { label: "Mar 17", value: 4.7 },
+  { label: "Mar 18", value: 4.4 },
+  { label: "Mar 19", value: 3.9 },
+  { label: "Mar 20", value: 4.2 },
+];
 
 const quickActions = [
   { label: "View Sessions", href: "/dashboard/sessions", icon: Eye },
@@ -144,7 +182,7 @@ export default function OverviewPage() {
               <motion.button
                 whileHover={{ y: -1 }}
                 whileTap={{ scale: 0.98 }}
-                className="inline-flex items-center gap-2 h-8 px-3.5 rounded-lg text-[12px] font-medium text-[var(--text-secondary)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] hover:border-[var(--border-default)] hover:text-[var(--text-primary)] transition-colors"
+                className="inline-flex items-center gap-2 h-8 px-3.5 rounded-lg text-[12px] font-medium text-[var(--text-secondary)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] hover:border-[var(--border-default)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
               >
                 <Icon className="w-3.5 h-3.5" />
                 {action.label}
@@ -157,30 +195,33 @@ export default function OverviewPage() {
 
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {/* Sessions Over Time Chart Placeholder */}
+        {/* Sessions Over Time Chart */}
         <div className="rounded-xl glass gradient-border overflow-hidden">
           <div className="relative p-5">
             <div className="relative z-[3]">
               <h3 className="text-[13px] font-medium mb-4 text-[var(--text-primary)]">Sessions Over Time</h3>
-              <div className="h-48 flex items-center justify-center mesh-gradient-1 rounded-lg">
-                <p className="text-[var(--text-tertiary)] text-[12px]">
-                  Chart will be implemented in Phase 2
-                </p>
-              </div>
+              <AreaChart
+                data={sessionsOverTime}
+                color="var(--accent-blue)"
+                gradientId="sessions-area"
+                height={192}
+                formatValue={(v) => v.toLocaleString()}
+              />
             </div>
           </div>
         </div>
 
-        {/* Failure Rate Chart Placeholder */}
+        {/* Failure Rate Trend Chart */}
         <div className="rounded-xl glass gradient-border overflow-hidden">
           <div className="relative p-5">
             <div className="relative z-[3]">
               <h3 className="text-[13px] font-medium mb-4 text-[var(--text-primary)]">Failure Rate Trend</h3>
-              <div className="h-48 flex items-center justify-center mesh-gradient-2 rounded-lg">
-                <p className="text-[var(--text-tertiary)] text-[12px]">
-                  Chart will be implemented in Phase 2
-                </p>
-              </div>
+              <LineChart
+                data={failureRateData}
+                color="var(--accent-red)"
+                height={192}
+                valueSuffix="%"
+              />
             </div>
           </div>
         </div>
@@ -242,17 +283,15 @@ export default function OverviewPage() {
                       </td>
                       <td className="px-5 py-2.5 text-[13px] text-[var(--text-primary)]">{session.agent}</td>
                       <td className="px-5 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              session.status === "healed" ? "status-healed" :
-                              session.status === "failed" ? "status-failed" :
-                              session.status === "running" ? "animate-pulse" : ""
-                            }`}
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium capitalize ${statusBadgeClass[session.status] || ""}`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${statusDotClass[session.status] || ""}`}
                             style={{ backgroundColor: statusColors[session.status] }}
                           />
-                          <span className="text-[12px] capitalize text-[var(--text-secondary)]">{session.status}</span>
-                        </div>
+                          {session.status}
+                        </span>
                       </td>
                       <td className="px-5 py-2.5 text-[12px] text-[var(--text-secondary)] tabular-nums">
                         {session.duration > 0

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -8,10 +8,13 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import { fadeIn, staggerContainer, staggerItem } from "@/lib/animations";
 import { SkeletonTable } from "@/components/skeleton";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import type { Session } from "@/lib/types";
 
 // --- Mock Data ---
@@ -186,12 +189,40 @@ const mockSessions: (Session & { time_ago: string })[] = [
   },
 ];
 
-const statusColors: Record<string, string> = {
-  completed: "var(--accent-green)",
-  failed: "var(--accent-red)",
-  running: "var(--accent-blue)",
-  timeout: "var(--accent-amber)",
-  healed: "var(--healing-blue)",
+const statusConfig: Record<
+  string,
+  { color: string; bgClass: string; dotClass: string }
+> = {
+  completed: {
+    color: "var(--accent-green)",
+    bgClass:
+      "bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20",
+    dotClass: "",
+  },
+  failed: {
+    color: "var(--accent-red)",
+    bgClass:
+      "bg-[var(--accent-red)]/10 text-[var(--accent-red)] border border-[var(--accent-red)]/20",
+    dotClass: "status-failed",
+  },
+  running: {
+    color: "var(--accent-blue)",
+    bgClass:
+      "bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] border border-[var(--accent-blue)]/20",
+    dotClass: "animate-pulse",
+  },
+  timeout: {
+    color: "var(--accent-amber)",
+    bgClass:
+      "bg-[var(--accent-amber)]/10 text-[var(--accent-amber)] border border-[var(--accent-amber)]/20",
+    dotClass: "",
+  },
+  healed: {
+    color: "var(--healing-blue)",
+    bgClass:
+      "bg-[var(--healing-blue)]/10 text-[var(--healing-blue)] border border-[var(--healing-blue)]/20",
+    dotClass: "status-healed",
+  },
 };
 
 function formatDuration(ms: number): string {
@@ -212,17 +243,45 @@ function formatTokens(tokens: number): string {
 export default function SessionsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<(Session & { time_ago: string })[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
+  const [refreshing, setRefreshing] = useState(false);
   const pageSize = 10;
 
-  useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 800);
-    return () => clearTimeout(timer);
+  const fetchSessions = useCallback(() => {
+    setLoading(true);
+    setFetchError(null);
+
+    try {
+      // TODO: Replace with api.get<Session[]>("/v1/sessions") when backend is ready
+      const timer = setTimeout(() => {
+        setSessions(mockSessions);
+        setLoading(false);
+      }, 800);
+      return () => clearTimeout(timer);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load sessions";
+      console.error(`[AgentStack] ${new Date().toISOString()} SessionsPage ${message}`);
+      setFetchError(message);
+      setLoading(false);
+    }
   }, []);
 
-  const filtered = mockSessions.filter((s) => {
+  useEffect(() => {
+    const cleanup = fetchSessions();
+    return cleanup;
+  }, [fetchSessions]);
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchSessions();
+    setTimeout(() => setRefreshing(false), 800);
+  };
+
+  const filtered = sessions.filter((s) => {
     const matchesSearch =
       search === "" ||
       s.agent_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -238,8 +297,8 @@ export default function SessionsPage() {
     currentPage * pageSize
   );
 
-  const isEmpty = !loading && filtered.length === 0;
-  const isEmptyState = !loading && mockSessions.length === 0;
+  const isEmpty = !loading && !fetchError && filtered.length === 0;
+  const isEmptyState = !loading && !fetchError && sessions.length === 0;
 
   return (
     <motion.div
@@ -258,42 +317,90 @@ export default function SessionsPage() {
 
       {/* Search / Filter Bar */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)]" />
-          <Input
-            placeholder="Search by agent name or session ID..."
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="pl-10 bg-[var(--bg-elevated)] border-[var(--border-subtle)] text-sm"
-          />
+        <div className="relative flex-1 flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)]" />
+            <Input
+              placeholder="Search by agent name or session ID..."
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="pl-10 bg-[var(--bg-elevated)] border-[var(--border-subtle)] text-sm"
+            />
+          </div>
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={handleRefresh}
+            className="flex items-center justify-center w-9 h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] transition-colors flex-shrink-0"
+            title="Refresh"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+            />
+          </motion.button>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {["all", "completed", "failed", "running", "timeout", "healed"].map(
-            (status) => (
-              <button
-                key={status}
-                onClick={() => {
-                  setStatusFilter(status);
-                  setCurrentPage(1);
-                }}
-                className={`px-3 py-2 text-xs rounded-lg border transition-colors capitalize ${
-                  statusFilter === status
-                    ? "border-[var(--accent-blue)] bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]"
-                    : "border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-default)]"
-                }`}
-              >
-                {status}
-              </button>
-            )
+            (status) => {
+              const isActive = statusFilter === status;
+              const config = status !== "all" ? statusConfig[status] : null;
+              return (
+                <button
+                  key={status}
+                  onClick={() => {
+                    setStatusFilter(status);
+                    setCurrentPage(1);
+                  }}
+                  className={`px-3 py-1.5 text-xs rounded-lg border transition-all duration-150 capitalize ${
+                    isActive
+                      ? status === "all"
+                        ? "border-[var(--accent-blue)] bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]"
+                        : config?.bgClass || ""
+                      : "border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)]"
+                  }`}
+                >
+                  {status !== "all" && (
+                    <span
+                      className="inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle"
+                      style={{
+                        backgroundColor: config?.color,
+                      }}
+                    />
+                  )}
+                  {status}
+                </button>
+              );
+            }
           )}
         </div>
       </div>
 
       {/* Loading State */}
       {loading && <SkeletonTable rows={6} cols={7} />}
+
+      {/* Error State */}
+      {fetchError && (
+        <div className="rounded-xl border border-[var(--accent-red)]/20 bg-[var(--bg-elevated)] p-8 text-center">
+          <div className="w-12 h-12 rounded-xl bg-[var(--accent-red)]/10 flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle className="w-6 h-6 text-[var(--accent-red)]" />
+          </div>
+          <h3 className="text-sm font-medium mb-1">Failed to load sessions</h3>
+          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto mb-4">
+            {fetchError}
+          </p>
+          <Button
+            onClick={fetchSessions}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* Empty State */}
       {isEmptyState && (
@@ -323,7 +430,7 @@ export default function SessionsPage() {
       )}
 
       {/* Table */}
-      {!loading && paginated.length > 0 && (
+      {!loading && !fetchError && paginated.length > 0 && (
         <motion.div
           variants={staggerContainer}
           initial="hidden"
@@ -353,103 +460,99 @@ export default function SessionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {paginated.map((session) => (
-                  <motion.tr
-                    key={session.id}
-                    variants={staggerItem}
-                    onClick={() =>
-                      router.push(`/dashboard/sessions/${session.id}`)
-                    }
-                    className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer"
-                  >
-                    <td className="px-5 py-3">
-                      <span className="font-mono text-xs text-[var(--text-secondary)]">
-                        {session.id}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3 text-sm">{session.agent_name}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <div
-                          className={`w-2 h-2 rounded-full ${
-                            session.status === "healed"
-                              ? "status-healed"
-                              : session.status === "failed"
-                              ? "status-failed"
-                              : session.status === "running"
-                              ? "animate-pulse"
-                              : ""
-                          }`}
-                          style={{
-                            backgroundColor: statusColors[session.status],
-                          }}
-                        />
-                        <span className="text-sm capitalize">
+                {paginated.map((session) => {
+                  const sc = statusConfig[session.status] || statusConfig.completed;
+                  return (
+                    <motion.tr
+                      key={session.id}
+                      variants={staggerItem}
+                      onClick={() =>
+                        router.push(`/dashboard/sessions/${session.id}`)
+                      }
+                      className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer group"
+                    >
+                      <td className="px-5 py-3">
+                        <span className="font-mono text-xs text-[var(--text-secondary)] group-hover:text-[var(--accent-blue)] transition-colors">
+                          {session.id}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-sm">{session.agent_name}</td>
+                      <td className="px-5 py-3">
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium capitalize ${sc.bgClass}`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${sc.dotClass}`}
+                            style={{ backgroundColor: sc.color }}
+                          />
                           {session.status}
                         </span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">
-                      {formatDuration(session.duration_ms)}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">
-                      {formatTokens(session.total_tokens)}
-                    </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">
-                      {formatCost(session.total_cost_cents)}
-                    </td>
-                    <td className="px-5 py-3 text-xs text-[var(--text-tertiary)]">
-                      {session.time_ago}
-                    </td>
-                  </motion.tr>
-                ))}
+                      </td>
+                      <td className="px-5 py-3 text-sm text-[var(--text-secondary)] tabular-nums">
+                        {formatDuration(session.duration_ms)}
+                      </td>
+                      <td className="px-5 py-3 text-sm text-[var(--text-secondary)] tabular-nums">
+                        {formatTokens(session.total_tokens)}
+                      </td>
+                      <td className="px-5 py-3 text-sm text-[var(--text-secondary)] tabular-nums">
+                        {formatCost(session.total_cost_cents)}
+                      </td>
+                      <td className="px-5 py-3 text-xs text-[var(--text-tertiary)]">
+                        {session.time_ago}
+                      </td>
+                    </motion.tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--border-subtle)]">
-              <p className="text-xs text-[var(--text-tertiary)]">
-                Showing {(currentPage - 1) * pageSize + 1}-
-                {Math.min(currentPage * pageSize, filtered.length)} of{" "}
-                {filtered.length}
-              </p>
+          <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--border-subtle)]">
+            <p className="text-xs text-[var(--text-tertiary)]">
+              Showing {(currentPage - 1) * pageSize + 1}
+              {"\u2013"}
+              {Math.min(currentPage * pageSize, filtered.length)} of{" "}
+              {filtered.length} sessions
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() =>
+                  setCurrentPage((p) => Math.max(1, p - 1))
+                }
+                disabled={currentPage === 1}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] hover:border-[var(--border-default)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-[var(--bg-elevated)] transition-colors"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                Previous
+              </button>
               <div className="flex items-center gap-1">
-                <button
-                  onClick={() =>
-                    setCurrentPage((p) => Math.max(1, p - 1))
-                  }
-                  disabled={currentPage === 1}
-                  className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
                 {Array.from({ length: totalPages }).map((_, i) => (
                   <button
                     key={i}
                     onClick={() => setCurrentPage(i + 1)}
-                    className={`w-8 h-8 rounded-lg text-xs transition-colors ${
+                    className={`w-8 h-8 rounded-lg text-xs font-medium transition-colors ${
                       currentPage === i + 1
-                        ? "bg-[var(--accent-blue)]/10 text-[var(--accent-blue)]"
+                        ? "bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] border border-[var(--accent-blue)]/20"
                         : "hover:bg-[var(--bg-hover)] text-[var(--text-secondary)]"
                     }`}
                   >
                     {i + 1}
                   </button>
                 ))}
-                <button
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
-                  disabled={currentPage === totalPages}
-                  className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
               </div>
+              <button
+                onClick={() =>
+                  setCurrentPage((p) => Math.min(totalPages, p + 1))
+                }
+                disabled={currentPage === totalPages}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)] hover:border-[var(--border-default)] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-[var(--bg-elevated)] transition-colors"
+              >
+                Next
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-          )}
+          </div>
         </motion.div>
       )}
     </motion.div>

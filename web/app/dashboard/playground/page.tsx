@@ -19,7 +19,7 @@ import {
   PanelRightOpen,
   Sparkles,
 } from "lucide-react";
-import { fadeIn, staggerContainer, staggerItem } from "@/lib/animations";
+import { fadeIn } from "@/lib/animations";
 import { SkeletonBlock } from "@/components/skeleton";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -70,8 +70,6 @@ interface HistoryEntry {
 }
 
 // --- Constants ---
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-
 const MODELS: ModelConfig[] = [
   { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI", providerColor: "#10a37f", badge: "Latest" },
   { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", providerColor: "#10a37f", badge: "Fast" },

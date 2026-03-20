@@ -7,11 +7,11 @@ import {
   Database,
   Clock,
   Server,
-  BarChart3,
   CheckCircle2,
   XCircle,
 } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
+import { DonutChart } from "@/components/charts";
 import {
   fadeIn,
   staggerContainer,
@@ -143,6 +143,16 @@ const providerColors: Record<string, string> = {
   mistral: "var(--accent-red)",
 };
 
+// Provider distribution for donut chart (using specific brand colors)
+const providerDistribution = [
+  { label: "OpenAI", value: 82450, color: "#10a37f" },
+  { label: "Anthropic", value: 41080, color: "#d4a574" },
+  { label: "Google", value: 27650, color: "#4285f4" },
+  { label: "Together", value: 18430, color: "#ff6b35" },
+  { label: "Groq", value: 11070, color: "#f55036" },
+  { label: "Mistral", value: 3640, color: "#ff7000" },
+];
+
 function formatTokens(tokens: number): string {
   if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`;
   return tokens.toLocaleString();
@@ -150,6 +160,18 @@ function formatTokens(tokens: number): string {
 
 function formatCost(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
+}
+
+function getLatencyColor(ms: number): string {
+  if (ms > 1000) return "var(--accent-red)";
+  if (ms > 500) return "var(--accent-red)";
+  if (ms > 300) return "var(--accent-amber)";
+  return "var(--text-secondary)";
+}
+
+function getLatencyWeight(ms: number): string {
+  if (ms > 500) return "font-medium";
+  return "";
 }
 
 export default function RouteOverviewPage() {
@@ -219,7 +241,7 @@ export default function RouteOverviewPage() {
         </motion.div>
       )}
 
-      {/* Chart Placeholder */}
+      {/* Request Distribution by Provider */}
       {loading ? (
         <SkeletonChart />
       ) : (
@@ -227,12 +249,10 @@ export default function RouteOverviewPage() {
           <h3 className="text-sm font-medium mb-4">
             Request Distribution by Provider
           </h3>
-          <div className="h-48 flex items-center justify-center text-[var(--text-tertiary)] text-sm">
-            <div className="text-center">
-              <BarChart3 className="w-8 h-8 mx-auto mb-2 opacity-30" />
-              <p>Chart will be implemented with D3.js</p>
-            </div>
-          </div>
+          <DonutChart
+            data={providerDistribution}
+            height={240}
+          />
         </div>
       )}
 
@@ -292,7 +312,7 @@ export default function RouteOverviewPage() {
                   <motion.tr
                     key={req.id}
                     variants={staggerItem}
-                    className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors"
+                    className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer group"
                   >
                     <td className="px-5 py-3 text-xs text-[var(--text-tertiary)] whitespace-nowrap">
                       {req.time_ago}
@@ -302,10 +322,11 @@ export default function RouteOverviewPage() {
                     </td>
                     <td className="px-5 py-3">
                       <span
-                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium capitalize"
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium capitalize border"
                         style={{
-                          backgroundColor: `color-mix(in srgb, ${providerColors[req.provider] || "var(--text-tertiary)"} 12%, transparent)`,
+                          backgroundColor: `color-mix(in srgb, ${providerColors[req.provider] || "var(--text-tertiary)"} 10%, transparent)`,
                           color: providerColors[req.provider] || "var(--text-tertiary)",
+                          borderColor: `color-mix(in srgb, ${providerColors[req.provider] || "var(--text-tertiary)"} 20%, transparent)`,
                         }}
                       >
                         {req.provider}
@@ -319,7 +340,7 @@ export default function RouteOverviewPage() {
                           <XCircle className="w-3.5 h-3.5 text-[var(--accent-red)]" />
                         )}
                         <span
-                          className="text-xs capitalize"
+                          className="text-xs capitalize font-medium"
                           style={{
                             color:
                               req.status === "success"
@@ -331,23 +352,19 @@ export default function RouteOverviewPage() {
                         </span>
                       </div>
                     </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">
+                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)] tabular-nums">
                       {req.tokens > 0 ? formatTokens(req.tokens) : "\u2014"}
                     </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">
+                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)] tabular-nums">
                       {req.cost_cents > 0
                         ? formatCost(req.cost_cents)
                         : "\u2014"}
                     </td>
-                    <td className="px-5 py-3 text-sm text-[var(--text-secondary)]">
+                    <td className="px-5 py-3 tabular-nums">
                       <span
+                        className={`text-sm ${getLatencyWeight(req.latency_ms)}`}
                         style={{
-                          color:
-                            req.latency_ms > 1000
-                              ? "var(--accent-red)"
-                              : req.latency_ms > 500
-                              ? "var(--accent-amber)"
-                              : "var(--text-secondary)",
+                          color: getLatencyColor(req.latency_ms),
                         }}
                       >
                         {req.latency_ms}ms
@@ -355,11 +372,12 @@ export default function RouteOverviewPage() {
                     </td>
                     <td className="px-5 py-3">
                       {req.cache_hit ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-medium bg-[var(--accent-green)]/10 text-[var(--accent-green)]">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-[var(--accent-green)]/10 text-[var(--accent-green)] border border-[var(--accent-green)]/20">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)]" />
                           HIT
                         </span>
                       ) : (
-                        <span className="text-xs text-[var(--text-tertiary)]">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
                           MISS
                         </span>
                       )}

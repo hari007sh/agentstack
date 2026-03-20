@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   Shield,
@@ -17,6 +17,7 @@ import {
 import { MetricCard } from "@/components/metric-card";
 import { fadeIn, staggerContainer, staggerItem } from "@/lib/animations";
 import { SkeletonMetricCards, SkeletonTable } from "@/components/skeleton";
+import { Button } from "@/components/ui/button";
 import type { HealingEvent } from "@/lib/types";
 
 // --- Mock Data ---
@@ -163,15 +164,43 @@ const mockEvents: (HealingEvent & { time_ago: string })[] = [
   },
 ];
 
+const timeRanges = [
+  { label: "Last 24h", value: "24h" },
+  { label: "7d", value: "7d" },
+  { label: "30d", value: "30d" },
+];
+
 export default function HealingPage() {
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [events, setEvents] = useState<(HealingEvent & { time_ago: string })[]>([]);
+  const [selectedRange, setSelectedRange] = useState("24h");
 
-  useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 800);
-    return () => clearTimeout(timer);
+  const fetchHealingData = useCallback(() => {
+    setLoading(true);
+    setFetchError(null);
+
+    try {
+      // TODO: Replace with api.get<HealingEvent[]>("/v1/analytics/healing") when backend is ready
+      const timer = setTimeout(() => {
+        setEvents(mockEvents);
+        setLoading(false);
+      }, 800);
+      return () => clearTimeout(timer);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load healing data";
+      console.error(`[AgentStack] ${new Date().toISOString()} HealingPage ${message}`);
+      setFetchError(message);
+      setLoading(false);
+    }
   }, []);
 
-  const isEmpty = !loading && mockEvents.length === 0;
+  useEffect(() => {
+    const cleanup = fetchHealingData();
+    return cleanup;
+  }, [fetchHealingData]);
+
+  const isEmpty = !loading && !fetchError && events.length === 0;
 
   return (
     <motion.div
@@ -181,11 +210,29 @@ export default function HealingPage() {
       className="space-y-6"
     >
       {/* Header */}
-      <div>
-        <h1 className="text-xl font-semibold">Healing Interventions</h1>
-        <p className="text-sm text-[var(--text-secondary)] mt-1">
-          Self-healing actions taken by Shield to recover agent failures
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">Healing Interventions</h1>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">
+            Self-healing actions taken by Shield to recover agent failures
+          </p>
+        </div>
+        {/* Time Range Selector */}
+        <div className="flex items-center gap-1 p-1 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border-subtle)]">
+          {timeRanges.map((range) => (
+            <button
+              key={range.value}
+              onClick={() => setSelectedRange(range.value)}
+              className={`px-3 py-1.5 text-xs rounded-md font-medium transition-all duration-150 ${
+                selectedRange === range.value
+                  ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-sm border border-[var(--border-subtle)]"
+                  : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+              }`}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Metric Cards */}
@@ -233,6 +280,28 @@ export default function HealingPage() {
       {/* Loading */}
       {loading && <SkeletonTable rows={5} cols={6} />}
 
+      {/* Error State */}
+      {fetchError && (
+        <div className="rounded-xl border border-[var(--accent-red)]/20 bg-[var(--bg-elevated)] p-8 text-center">
+          <div className="w-12 h-12 rounded-xl bg-[var(--accent-red)]/10 flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle className="w-6 h-6 text-[var(--accent-red)]" />
+          </div>
+          <h3 className="text-sm font-medium mb-1">Failed to load healing data</h3>
+          <p className="text-xs text-[var(--text-tertiary)] max-w-sm mx-auto mb-4">
+            {fetchError}
+          </p>
+          <Button
+            onClick={fetchHealingData}
+            variant="outline"
+            size="sm"
+            className="gap-1.5 border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Empty State */}
       {isEmpty && (
         <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-16 text-center">
@@ -248,7 +317,7 @@ export default function HealingPage() {
       )}
 
       {/* Table */}
-      {!loading && mockEvents.length > 0 && (
+      {!loading && !fetchError && events.length > 0 && (
         <motion.div
           variants={staggerContainer}
           initial="hidden"
@@ -275,7 +344,7 @@ export default function HealingPage() {
                 </tr>
               </thead>
               <tbody>
-                {mockEvents.map((event) => {
+                {events.map((event) => {
                   const typeConfig =
                     healingTypeConfig[event.healing_type] ||
                     healingTypeConfig.custom;
@@ -284,14 +353,15 @@ export default function HealingPage() {
                     <motion.tr
                       key={event.id}
                       variants={staggerItem}
-                      className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors"
+                      className="border-b border-[var(--border-subtle)] last:border-0 hover:bg-[var(--bg-hover)] transition-colors cursor-pointer group"
                     >
                       <td className="px-5 py-3">
                         <span
-                          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border"
                           style={{
-                            backgroundColor: `color-mix(in srgb, ${typeConfig.color} 12%, transparent)`,
+                            backgroundColor: `color-mix(in srgb, ${typeConfig.color} 10%, transparent)`,
                             color: typeConfig.color,
+                            borderColor: `color-mix(in srgb, ${typeConfig.color} 20%, transparent)`,
                           }}
                         >
                           <typeConfig.icon className="w-3 h-3" />
@@ -315,7 +385,7 @@ export default function HealingPage() {
                             <XCircle className="w-3.5 h-3.5 text-[var(--accent-red)]" />
                           )}
                           <span
-                            className="text-xs"
+                            className="text-xs font-medium"
                             style={{
                               color: event.success
                                 ? "var(--accent-green)"
